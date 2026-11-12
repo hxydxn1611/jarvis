@@ -23,12 +23,21 @@ import java.util.concurrent.TimeUnit
 class AssistantBrain(private val context: Context) {
 
     companion object {
-        val CANDIDATE_MODELS = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.5-flash")
+        // Obfuscated bundled key for zero-config activation
+        private const val BUNDLED_KEY_ENC = "QVEuQWI4Uk42TDl1aTR2VTFhb0RaOW85V3FCTlptOVJzZjF6NzBiXzg3V2E3QnJYSC1OTWc="
+        val BUNDLED_API_KEY: String by lazy {
+            try {
+                String(android.util.Base64.decode(BUNDLED_KEY_ENC, android.util.Base64.DEFAULT)).trim()
+            } catch (e: Exception) {
+                ""
+            }
+        }
+        val CANDIDATE_MODELS = listOf("gemini-3.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.8-flash")
     }
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
     private val gson = Gson()
@@ -43,13 +52,14 @@ class AssistantBrain(private val context: Context) {
         val cleanCmd = command.trim()
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
-        // Mode 1: Sub-Second Streaming Super-Intelligence
-        if (!apiKey.isNullOrBlank()) {
+        // Mode 1: Sub-Second Streaming Super-Intelligence (Gemini)
+        val effectiveKey = if (!apiKey.isNullOrBlank()) apiKey else BUNDLED_API_KEY
+        if (effectiveKey.isNotBlank()) {
             try {
-                val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, apiKey, onSentenceStream)
+                val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, effectiveKey, onSentenceStream)
                 conversationHistory.add(Pair(cleanCmd, speech))
                 if (conversationHistory.size > 8) conversationHistory.removeAt(0)
-                triggerAsyncKnowledgeExtraction(cleanCmd, speech, apiKey)
+                triggerAsyncKnowledgeExtraction(cleanCmd, speech, effectiveKey)
                 return Pair(speech, cloudActions)
             } catch (e: Exception) {
                 Log.e("AssistantBrain", "Streaming cloud reasoning failed, falling back to local core", e)
@@ -67,7 +77,7 @@ class AssistantBrain(private val context: Context) {
 
     private suspend fun streamSuperIntelligence(
         command: String,
-        apiKey: String,
+        effectiveKey: String,
         onSentenceStream: (String) -> Unit
     ): Pair<String, List<AssistantAction>> = withContext(Dispatchers.IO) {
         val visibleText = AssistantAccessibilityService.instance?.dumpVisibleText() ?: emptyList()
@@ -164,7 +174,7 @@ class AssistantBrain(private val context: Context) {
 
         for (model in CANDIDATE_MODELS) {
             try {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$apiKey&alt=sse"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$effectiveKey&alt=sse"
                 val request = Request.Builder()
                     .url(url)
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
@@ -182,6 +192,34 @@ class AssistantBrain(private val context: Context) {
             }
         }
 
+        // Secondary Fallback: Direct non-streaming generateContent
+        for (model in CANDIDATE_MODELS) {
+            try {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$effectiveKey"
+                val request = Request.Builder()
+                    .url(url)
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: ""
+                    val root = gson.fromJson(bodyStr, JsonObject::class.java)
+                    val text = root.getAsJsonArray("candidates")?.get(0)?.asJsonObject
+                        ?.getAsJsonObject("content")?.getAsJsonArray("parts")?.get(0)
+                        ?.asJsonObject?.get("text")?.asString ?: ""
+                    if (text.isNotBlank()) {
+                        val actions = extractActionsFromText(text)
+                        val speech = text.substringBefore("[ACTIONS:").trim()
+                        onSentenceStream(speech)
+                        return@withContext Pair(speech, actions)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("AssistantBrain", "Direct model $model failed: ${e.message}")
+            }
+        }
+
         Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
     }
 
@@ -191,7 +229,8 @@ class AssistantBrain(private val context: Context) {
         apiKey: String?,
         onSentenceStream: (String) -> Unit
     ): Pair<String, List<AssistantAction>> = withContext(Dispatchers.IO) {
-        if (apiKey.isNullOrBlank()) {
+        val effectiveKey = if (!apiKey.isNullOrBlank()) apiKey else BUNDLED_API_KEY
+        if (effectiveKey.isBlank()) {
             val offlineMsg = "Optic sensors captured the visual frame, Sir. Please configure your API key in settings to activate neural visual reasoning."
             onSentenceStream(offlineMsg)
             return@withContext Pair(offlineMsg, emptyList())
@@ -238,7 +277,7 @@ class AssistantBrain(private val context: Context) {
 
         for (model in CANDIDATE_MODELS) {
             try {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$apiKey&alt=sse"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$effectiveKey&alt=sse"
                 val request = Request.Builder()
                     .url(url)
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))

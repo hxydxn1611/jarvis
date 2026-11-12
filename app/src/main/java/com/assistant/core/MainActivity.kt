@@ -82,6 +82,9 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         isHandsFreeEnabled = prefs.getBoolean("hands_free_wake_word", false)
+        if (prefs.getString("gemini_api_key", "").isNullOrBlank()) {
+            prefs.edit().putString("gemini_api_key", AssistantBrain.BUNDLED_API_KEY).apply()
+        }
 
         brain = AssistantBrain(this)
         VoiceManager.init(this)
@@ -941,7 +944,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        if (!prefs.getString("gemini_api_key", "").isNullOrBlank()) {
+        val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank() || AssistantBrain.BUNDLED_API_KEY.isNotBlank()
+        if (hasKey) {
             binding.tvStatusPill.text = "● SUPER-BRAIN ONLINE"
         }
     }
