@@ -152,9 +152,8 @@ class WakeWordService : Service() {
 
                     override fun onResults(results: Bundle?) {
                         isListening = false
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val spoken = matches?.firstOrNull()?.trim() ?: ""
-                        handleDetectedUtterance(spoken)
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
+                        handleDetectedMatches(matches)
                     }
 
                     override fun onPartialResults(partialResults: Bundle?) {
@@ -183,10 +182,13 @@ class WakeWordService : Service() {
         }
 
         try {
+            speechRecognizer?.cancel()
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.UK.toString())
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                val tag = Locale.getDefault().toLanguageTag()
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             }
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
@@ -194,15 +196,46 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun handleDetectedUtterance(text: String) {
-        if (WAKE_WORD_REGEX.containsMatchIn(text)) {
-            SoundEffectManager.playWakeChime()
+    private fun handleDetectedMatches(candidates: List<String>) {
+        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+        val customSignatures = prefs.getStringSet("custom_wake_signatures", emptySet()) ?: emptySet()
 
-            val command = text.replace(WAKE_WORD_REGEX, "").trim().removePrefix(",").trim()
+        var matched = false
+        var command = ""
+
+        val wakeRegexes = listOf(
+            Regex("""\b(hey|hi|hello|ok|okay|yo|a)?\s*(jarvis|jervis|jarves|javis|jarviz|travis|service)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bjarvis\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
+        )
+
+        for (candidate in candidates) {
+            val text = candidate.trim()
+            for (custom in customSignatures) {
+                if (text.contains(custom, ignoreCase = true)) {
+                    matched = true
+                    command = text.substringAfter(custom, "").trim().removePrefix(",").trim()
+                    break
+                }
+            }
+            if (matched) break
+
+            for (regex in wakeRegexes) {
+                val match = regex.find(text)
+                if (match != null) {
+                    matched = true
+                    command = text.substring(match.range.last + 1).trim().removePrefix(",").trim()
+                    break
+                }
+            }
+            if (matched) break
+        }
+
+        if (matched) {
+            SoundEffectManager.playWakeChime()
 
             if (command.isNotBlank()) {
                 scope.launch {
-                    val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
                     val apiKey = prefs.getString("gemini_api_key", null)
                     val (_, actions) = brain.processCommandStream(command, apiKey) { chunk ->
                         VoiceManager.streamSentence(chunk)
@@ -218,7 +251,6 @@ class WakeWordService : Service() {
                     }
                 }
             } else {
-                // User said "Hey Jarvis" with no trailing query
                 val bringToFront = Intent(this, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     putExtra("AUTO_LISTEN", true)
@@ -233,7 +265,6 @@ class WakeWordService : Service() {
                 }
             }
         } else {
-            // Did not match wake word, restart loop calmly
             scope.launch {
                 delay(800)
                 restartRecognizer()

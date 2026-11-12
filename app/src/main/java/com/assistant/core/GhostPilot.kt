@@ -121,6 +121,39 @@ object GhostPilot {
         }
     }
 
+    fun playYouTube(context: Context, searchQuery: String) {
+        val service = AssistantAccessibilityService.instance
+        if (service != null) {
+            playYouTube(service, searchQuery) { _, _ -> }
+        } else {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=${URLEncoder.encode(searchQuery, "UTF-8")}")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch YouTube intent", e)
+            }
+        }
+    }
+
+    fun strobeFlashlight(context: Context, pulses: Int = 3) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+                val cameraId = cameraManager?.cameraIdList?.firstOrNull() ?: return@launch
+                for (i in 0 until pulses) {
+                    cameraManager.setTorchMode(cameraId, true)
+                    delay(120)
+                    cameraManager.setTorchMode(cameraId, false)
+                    delay(120)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Torch strobe not available", e)
+            }
+        }
+    }
+
     private fun clickSendButton(service: AssistantAccessibilityService): Boolean {
         val root = service.rootInActiveWindow ?: return false
         // WhatsApp Send button typically has content description "Send" or id "send"

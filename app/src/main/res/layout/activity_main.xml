@@ -152,7 +152,7 @@
         android:id="@+id/tv_core_state"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="ONLINE // TAP CORE TO SPEAK"
+        android:text="STANDBY // SAY 'HEY JARVIS'"
         android:textColor="#81D4FA"
         android:textSize="12sp"
         android:fontFamily="monospace"
@@ -161,6 +161,90 @@
         app:layout_constraintTop_toBottomOf="@id/core_container"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Stark Tactical Protocols Quick Action Bar -->
+    <HorizontalScrollView
+        android:id="@+id/scroll_protocols"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        app:layout_constraintTop_toBottomOf="@id/tv_core_state"
+        app:layout_constraintBottom_toTopOf="@id/dialogue_container">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp">
+
+            <TextView
+                android:id="@+id/chip_calibrate_voice"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/card_background"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:text="🎯 TRAIN VOICE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_diagnostics"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/card_background"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:text="📊 DIAGNOSTICS"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_clean_slate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/card_background"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:text="⚡ CLEAN SLATE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_house_party"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/card_background"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:text="🎉 HOUSE PARTY"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_stealth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/card_background"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:text="🛡️ STEALTH"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- Live Conversation Transcript Box -->
     <ScrollView

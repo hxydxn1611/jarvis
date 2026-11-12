@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -39,8 +40,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        // Strict isolated wake-word regex to eliminate ambient noise false-positives
-        private val WAKE_WORD_REGEX = Regex("""\b(hey\s+|ok\s+|hello\s+)?jarvis\b""", RegexOption.IGNORE_CASE)
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -192,6 +191,23 @@ class MainActivity : AppCompatActivity() {
             toggleHandsFree()
         }
 
+        // Stark Protocol Chips
+        binding.chipCalibrateVoice.setOnClickListener {
+            startVoiceCalibration()
+        }
+        binding.chipDiagnostics.setOnClickListener {
+            executeDiagnosticsProtocol()
+        }
+        binding.chipCleanSlate.setOnClickListener {
+            executeCleanSlateProtocol()
+        }
+        binding.chipHouseParty.setOnClickListener {
+            executeHousePartyProtocol()
+        }
+        binding.chipStealth.setOnClickListener {
+            executeStealthProtocol()
+        }
+
         // Send Text command via Keyboard
         binding.etCommand.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
@@ -247,7 +263,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- Foreground Hands-Free Ambient Listening ---
+    // --- Foreground Hands-Free Ambient Listening Array ---
 
     private fun startAmbientWakeWordListener() {
         if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking()) return
@@ -261,6 +277,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         try {
+            ambientRecognizer?.cancel()
             ambientRecognizer?.destroy()
             ambientRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
                 setRecognitionListener(object : RecognitionListener {
@@ -269,16 +286,25 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
+
+                    override fun onRmsChanged(rmsdB: Float) {
+                        // Live Arc Reactor sound reactivity: dynamically pulses cyan glow with user voice amplitude
+                        if (rmsdB > 2.0f && !VoiceManager.isCurrentlySpeaking()) {
+                            val boost = 1.0f + (rmsdB.coerceIn(0f, 10f) / 10f) * 0.22f
+                            binding.viewCoreGlow.scaleX = boost
+                            binding.viewCoreGlow.scaleY = boost
+                        }
+                    }
+
                     override fun onBufferReceived(buffer: ByteArray?) {}
                     override fun onEndOfSpeech() {}
 
                     override fun onError(error: Int) {
                         isAmbientListening = false
-                        // Calm backoff (1200ms) to prevent audio thrashing on normal silence/timeout
+                        // On Android, must cancel before restarting, or recreate
                         if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
                             scope.launch {
-                                delay(1200)
+                                delay(650)
                                 if (isHandsFreeEnabled && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
                                     restartAmbientListener()
                                 }
@@ -288,65 +314,73 @@ class MainActivity : AppCompatActivity() {
 
                     override fun onResults(results: Bundle?) {
                         isAmbientListening = false
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val spoken = matches?.firstOrNull()?.trim() ?: ""
-                        if (spoken.isNotBlank()) {
-                            handleAmbientSpeech(spoken)
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
+                        if (matches.isNotEmpty()) {
+                            handleAmbientSpeechMatches(matches)
                         } else if (isHandsFreeEnabled && !isProcessingCommand) {
                             scope.launch {
-                                delay(800)
+                                delay(500)
                                 restartAmbientListener()
                             }
                         }
                     }
 
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        // Ignored to prevent premature false triggers on noisy intermediate speech
-                    }
-
+                    override fun onPartialResults(partialResults: Bundle?) {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
             }
-            restartAmbientListener()
+            launchAmbientListeningIntent()
         } catch (e: Exception) {
             Log.e(TAG, "Ambient recognizer init error", e)
         }
     }
 
     private fun restartAmbientListener() {
-        if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking()) return
+        if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking() || isFinishing || isDestroyed) return
+        try {
+            ambientRecognizer?.cancel()
+            launchAmbientListeningIntent()
+        } catch (e: Exception) {
+            startAmbientWakeWordListener()
+        }
+    }
+
+    private fun launchAmbientListeningIntent() {
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.UK.toString())
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                // Use device's native locale for 100% natural accent recognition
+                val tag = Locale.getDefault().toLanguageTag()
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // Inspect top 5 phonetic candidates
             }
             ambientRecognizer?.startListening(intent)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start ambient recognizer", e)
+            Log.e(TAG, "Failed to start listening", e)
         }
     }
 
     private fun stopAmbientWakeWordListener() {
         isAmbientListening = false
         try {
-            ambientRecognizer?.stopListening()
+            ambientRecognizer?.cancel()
             ambientRecognizer?.destroy()
             ambientRecognizer = null
         } catch (e: Exception) {}
     }
 
-    private fun handleAmbientSpeech(spoken: String) {
-        // Strict boundary check: must explicitly match "jarvis" or "hey jarvis"
-        if (WAKE_WORD_REGEX.containsMatchIn(spoken)) {
-            val trailingCommand = spoken.replace(WAKE_WORD_REGEX, "").trim().removePrefix(",").trim()
+    private fun handleAmbientSpeechMatches(matches: List<String>) {
+        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+        val customSignatures = prefs.getStringSet("custom_wake_signatures", emptySet()) ?: emptySet()
+
+        val (matched, command) = evaluateWakeMatch(matches, customSignatures)
+        if (matched) {
             stopAmbientWakeWordListener()
 
-            if (trailingCommand.isNotBlank()) {
-                // User said complete command directly: "Hey Jarvis what is the chemical equation of water"
-                handleUserInput(trailingCommand)
+            if (command.isNotBlank()) {
+                handleUserInput(command)
             } else {
-                // User solely addressed Jarvis: "Hey Jarvis"
                 setCoreActive(true)
                 binding.tvCoreState.text = "LISTENING SIR..."
                 binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir."
@@ -358,7 +392,7 @@ class MainActivity : AppCompatActivity() {
 
                 VoiceManager.speak("At your service, Sir.") {
                     scope.launch {
-                        delay(400) // Acoustic decay buffer
+                        delay(400)
                         runOnUiThread {
                             triggerVoiceListening()
                         }
@@ -366,10 +400,228 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } else {
-            // Unrelated speech or room sound: quietly restart standby
             scope.launch {
-                delay(800)
+                delay(600)
                 restartAmbientListener()
+            }
+        }
+    }
+
+    private fun evaluateWakeMatch(candidates: List<String>, customSignatures: Set<String>): Pair<Boolean, String> {
+        val wakeRegexes = listOf(
+            Regex("""\b(hey|hi|hello|ok|okay|yo|a)?\s*(jarvis|jervis|jarves|javis|jarviz|travis|service)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bjarvis\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
+        )
+
+        for (candidate in candidates) {
+            val text = candidate.trim()
+            // Check custom trained signatures first
+            for (custom in customSignatures) {
+                if (text.contains(custom, ignoreCase = true)) {
+                    val trailing = text.substringAfter(custom, "").trim().removePrefix(",").trim()
+                    return Pair(true, trailing)
+                }
+            }
+            // Check built-in regexes
+            for (regex in wakeRegexes) {
+                val match = regex.find(text)
+                if (match != null) {
+                    val trailing = text.substring(match.range.last + 1).trim().removePrefix(",").trim()
+                    return Pair(true, trailing)
+                }
+            }
+        }
+        return Pair(false, "")
+    }
+
+    // --- Interactive Voice Training / Calibration ---
+
+    private fun startVoiceCalibration() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+
+        binding.tvCoreState.text = "CALIBRATING VOCAL SIGNATURE..."
+        binding.tvTranscript.text = "Jarvis: Initiating acoustic calibration, Sir.\nPlease say 'Hey Jarvis' or your preferred callsign clearly now..."
+        setCoreActive(true)
+
+        VoiceManager.speak("Initiating acoustic calibration, Sir. Please say 'Hey Jarvis' clearly now.") {
+            runOnUiThread {
+                binding.tvTranscript.text = "Listening for your voice signature...\nSay 'Hey Jarvis' now."
+                val calibrator = SpeechRecognizer.createSpeechRecognizer(this)
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                }
+                calibrator.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {}
+                    override fun onError(error: Int) {
+                        isProcessingCommand = false
+                        calibrator.destroy()
+                        binding.tvTranscript.text = "Jarvis: Calibration timed out, Sir. Tap 'Train Voice' to try again."
+                        binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
+                        startAmbientWakeWordListener()
+                    }
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
+                        calibrator.destroy()
+                        if (matches.isNotEmpty()) {
+                            val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+                            val existing = prefs.getStringSet("custom_wake_signatures", emptySet())?.toMutableSet() ?: mutableSetOf()
+                            existing.addAll(matches.map { it.lowercase().trim() })
+                            prefs.edit().putStringSet("custom_wake_signatures", existing).apply()
+
+                            KnowledgeGraph.addNode(
+                                this@MainActivity,
+                                "VOICE_SIGNATURE",
+                                "User calibrated acoustic phrases: ${matches.joinToString()}",
+                                NodeCategory.PREFERENCE
+                            )
+
+                            SoundEffectManager.playConfirmChirp()
+                            binding.tvTranscript.text = "Jarvis: Voice profile locked and calibrated, Sir!\nRegistered signatures: ${matches.take(3).joinToString()}"
+                            binding.tvCoreState.text = "VOICE CALIBRATED // READY"
+                            Toast.makeText(this@MainActivity, "Voice Calibrated Successfully!", Toast.LENGTH_SHORT).show()
+
+                            VoiceManager.speak("Voice signature locked and synchronized, Sir. I am calibrated to your voice.") {
+                                runOnUiThread {
+                                    isProcessingCommand = false
+                                    setCoreActive(false)
+                                    startAmbientWakeWordListener()
+                                }
+                            }
+                        } else {
+                            isProcessingCommand = false
+                            startAmbientWakeWordListener()
+                        }
+                    }
+                    override fun onPartialResults(partialResults: Bundle?) {}
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+                calibrator.startListening(intent)
+            }
+        }
+    }
+
+    // --- Stark Tactical Protocols ---
+
+    private fun executeCleanSlateProtocol() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+        binding.tvTranscript.text = "CLEAN SLATE PROTOCOL INITIATED...\nPurging neural cache & workspace..."
+        binding.tvCoreState.text = "CLEAN SLATE ACTIVE"
+
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 50, 80), -1))
+        }
+
+        binding.etCommand.text?.clear()
+        binding.dialogueContainer.fullScroll(View.FOCUS_UP)
+        SoundEffectManager.playConfirmChirp()
+
+        VoiceManager.speak("Clean Slate Protocol executed, Sir. Neural workspace purged and systems recalibrated to factory baseline.") {
+            runOnUiThread {
+                isProcessingCommand = false
+                binding.tvTranscript.text = "Jarvis: Clean Slate complete, Sir. Systems standing by."
+                binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
+                startAmbientWakeWordListener()
+            }
+        }
+    }
+
+    private fun executeHousePartyProtocol() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+        binding.tvCoreState.text = "HOUSE PARTY PROTOCOL"
+        binding.tvTranscript.text = "🎉 HOUSE PARTY PROTOCOL ENGAGED!\nMax volume // Workshop alert // Playing Stark Anthem..."
+
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        audioManager?.setStreamVolume(
+            AudioManager.STREAM_MUSIC,
+            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+            0
+        )
+
+        // Strobe flashlight 3 times
+        GhostPilot.strobeFlashlight(this)
+
+        // Dispatch desktop bridge alert
+        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+        val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: "http://192.168.1.4:8888"
+        DeviceManager(this).dispatchDesktopCommand(bridgeUrl, "[ASYNC] echo 'HOUSE PARTY PROTOCOL ENGAGED'")
+
+        // Play AC/DC on YouTube hands-free
+        GhostPilot.playYouTube(this, "AC/DC Back in Black Iron Man")
+
+        VoiceManager.speak("House Party Protocol engaged, Sir. Pumping Stark audio to maximum and lighting up the workshop.") {
+            runOnUiThread {
+                isProcessingCommand = false
+                startAmbientWakeWordListener()
+            }
+        }
+    }
+
+    private fun executeDiagnosticsProtocol() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+        binding.tvCoreState.text = "RUNNING DIAGNOSTICS..."
+
+        val dm = DeviceManager(this)
+        val battery = dm.getBatteryLevel()
+        val time = dm.getFormattedSystemTime()
+        val hasAccess = AssistantAccessibilityService.isRunning
+        val hasHandsFree = isHandsFreeEnabled
+        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+        val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: "http://192.168.1.4:8888"
+        val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank()
+
+        val reportText = StringBuilder()
+            .append("STARK INDUSTRIES TELEMETRY REPORT\n")
+            .append("---------------------------------\n")
+            .append("• Time: $time\n")
+            .append("• Arc Power (Battery): $battery%\n")
+            .append("• Neural Super-Brain: ").append(if (hasKey) "ONLINE (Gemini)" else "LOCAL ONLY").append("\n")
+            .append("• Ghost Pilot (Accessibility): ").append(if (hasAccess) "ARMED" else "UNAUTHORIZED").append("\n")
+            .append("• Acoustic Wake Array: ").append(if (hasHandsFree) "ONLINE" else "DISARMED").append("\n")
+            .append("• Workstation Bridge: $bridgeUrl\n")
+            .toString()
+
+        binding.tvTranscript.text = reportText
+        SoundEffectManager.playConfirmChirp()
+
+        val speech = "Running comprehensive diagnostics, Sir. Arc power cell is at $battery percent. Tactical accessibility is ${if (hasAccess) "armed" else "offline"}. All primary defense grids are functional."
+
+        VoiceManager.speak(speech) {
+            runOnUiThread {
+                isProcessingCommand = false
+                binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
+                startAmbientWakeWordListener()
+            }
+        }
+    }
+
+    private fun executeStealthProtocol() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+        binding.tvCoreState.text = "STEALTH PROTOCOL"
+        binding.tvTranscript.text = "🛡️ STEALTH PROTOCOL ENGAGED\nSilent audio // Sentry armed // Low-profile HUD"
+
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        audioManager?.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+
+        SecuritySentinel.setSentryMode(this, true)
+
+        VoiceManager.speak("Stealth protocol armed, Sir. Silent running.") {
+            runOnUiThread {
+                isProcessingCommand = false
+                binding.tvCoreState.text = "STEALTH ACTIVE // SENTRY ARMED"
+                startAmbientWakeWordListener()
             }
         }
     }
@@ -456,7 +708,7 @@ class MainActivity : AppCompatActivity() {
 
             VoiceManager.onTurnComplete {
                 scope.launch {
-                    delay(700) // Acoustic echo decay buffer
+                    delay(700)
                     runOnUiThread {
                         isProcessingCommand = false
                         setCoreActive(false)
@@ -471,6 +723,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleUserInput(input: String) {
+        // Intercept Stark Tactical Protocols
+        val lower = input.lowercase().trim()
+        if (lower.contains("clean slate")) {
+            executeCleanSlateProtocol()
+            return
+        }
+        if (lower.contains("house party")) {
+            executeHousePartyProtocol()
+            return
+        }
+        if (lower.contains("diagnostics") || lower.contains("status report") || lower.contains("system status")) {
+            executeDiagnosticsProtocol()
+            return
+        }
+        if (lower.contains("stealth protocol") || lower.contains("stealth mode")) {
+            executeStealthProtocol()
+            return
+        }
+        if (lower.contains("calibrate voice") || lower.contains("train voice") || lower.contains("train my voice")) {
+            startVoiceCalibration()
+            return
+        }
+
         stopAmbientWakeWordListener()
         isProcessingCommand = true
 
@@ -484,7 +759,7 @@ class MainActivity : AppCompatActivity() {
             val liveTranscript = StringBuilder("You: $input\n\nJarvis: ")
 
             val (finalSpeech, actions) = brain.processCommandStream(input, apiKey) { sentenceChunk ->
-                // Plays sentence audio in real-time under 400ms
+                // Streams sentence audio in real-time under 400ms
                 runOnUiThread {
                     liveTranscript.append(sentenceChunk).append(" ")
                     binding.tvTranscript.text = liveTranscript.toString()
@@ -600,7 +875,6 @@ class MainActivity : AppCompatActivity() {
             binding.tvPermMessage.text = "Grant $missing permission for full control."
         } else {
             binding.cardPermissionAlert.visibility = View.GONE
-            // Auto start floating orb safely if authorized
             try {
                 startService(Intent(this, FloatingAssistantService::class.java))
             } catch (e: Exception) {
