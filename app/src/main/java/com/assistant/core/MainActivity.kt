@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -198,21 +200,12 @@ class MainActivity : AppCompatActivity() {
             toggleHandsFree()
         }
 
-        // Stark Protocol Chips
+        // Quick System Controls
         binding.chipCalibrateVoice.setOnClickListener {
             startVoiceCalibration()
         }
         binding.chipDiagnostics.setOnClickListener {
             executeDiagnosticsProtocol()
-        }
-        binding.chipCleanSlate.setOnClickListener {
-            executeCleanSlateProtocol()
-        }
-        binding.chipHouseParty.setOnClickListener {
-            executeHousePartyProtocol()
-        }
-        binding.chipStealth.setOnClickListener {
-            executeStealthProtocol()
         }
 
         // Send Text command via Keyboard
@@ -540,72 +533,188 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- Stark Tactical Protocols ---
+    // --- Direct Native Device Execution Engine ---
 
-    private fun executeCleanSlateProtocol() {
-        stopAmbientWakeWordListener()
-        isProcessingCommand = true
-        binding.tvTranscript.text = "CLEAN SLATE PROTOCOL INITIATED...\nPurging neural cache & workspace..."
-        binding.tvCoreState.text = "CLEAN SLATE ACTIVE"
+    private fun tryHandleDirectCommand(input: String): Boolean {
+        val lower = input.lowercase().trim()
 
-        try {
-            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 50, 80), -1))
+        // 1. Flashlight / Torch
+        if (lower.contains("flashlight on") || lower.contains("torch on") || 
+            lower.contains("turn on flashlight") || lower.contains("turn on torch") || 
+            lower.contains("turn on the flashlight") || lower.contains("turn on the torch")) {
+            setFlashlight(true)
+            speakAndDisplay("Illuminating flashlight, Sir.")
+            return true
+        }
+        if (lower.contains("flashlight off") || lower.contains("torch off") || 
+            lower.contains("turn off flashlight") || lower.contains("turn off torch") || 
+            lower.contains("turn off the flashlight") || lower.contains("turn off the torch")) {
+            setFlashlight(false)
+            speakAndDisplay("Deactivating flashlight, Sir.")
+            return true
+        }
+
+        // 2. Open Applications (Dynamic matching against all installed apps)
+        if (lower.startsWith("open ") || lower.startsWith("launch ") || lower.startsWith("start ")) {
+            val appName = lower.removePrefix("open ").removePrefix("launch ").removePrefix("start ").trim()
+            val opened = openAppByName(appName)
+            if (opened) {
+                speakAndDisplay("Opening $appName, Sir.")
+                return true
             }
-        } catch (e: Exception) {}
+        }
 
-        binding.etCommand.text?.clear()
-        binding.dialogueContainer.fullScroll(View.FOCUS_UP)
-        SoundEffectManager.playConfirmChirp()
+        // 3. Make Phone Calls
+        if (lower.startsWith("call ") || lower.startsWith("make a call to ") || lower.startsWith("dial ")) {
+            val target = lower.removePrefix("make a call to ").removePrefix("call ").removePrefix("dial ").trim()
+            speakAndDisplay("Initiating call to $target, Sir.")
+            DeviceManager(this).makeCall(target)
+            return true
+        }
 
-        VoiceManager.speak("Clean Slate Protocol executed, Sir. Neural workspace purged and systems recalibrated to factory baseline.") {
+        // 4. Play YouTube / Music
+        if (lower.startsWith("play ")) {
+            val song = lower.removePrefix("play ").trim()
+            speakAndDisplay("Queuing $song on your audio channels, Sir.")
+            GhostPilot.playYouTube(this, song)
+            return true
+        }
+
+        // 5. Volume adjustment
+        if (lower.contains("volume up") || lower.contains("increase volume") || lower.contains("raise volume")) {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+            speakAndDisplay("Raising audio volume, Sir.")
+            return true
+        }
+        if (lower.contains("volume down") || lower.contains("decrease volume") || lower.contains("lower volume")) {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+            speakAndDisplay("Lowering audio volume, Sir.")
+            return true
+        }
+
+        return false
+    }
+
+    private fun speakAndDisplay(text: String) {
+        runOnUiThread {
+            binding.tvTranscript.text = "Jarvis: $text"
+            binding.tvCoreState.text = "SPEAKING..."
+            SoundEffectManager.playConfirmChirp()
+        }
+        VoiceManager.speak(text) {
             runOnUiThread {
                 isProcessingCommand = false
-                binding.tvTranscript.text = "Jarvis: Clean Slate complete, Sir. Systems standing by."
+                setCoreActive(false)
                 binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
                 if (isHandsFreeEnabled) startAmbientWakeWordListener()
             }
         }
     }
 
-    private fun executeHousePartyProtocol() {
-        stopAmbientWakeWordListener()
-        isProcessingCommand = true
-        binding.tvCoreState.text = "HOUSE PARTY PROTOCOL"
-        binding.tvTranscript.text = "🎉 HOUSE PARTY PROTOCOL ENGAGED!\nMax volume // Workshop alert // Playing Stark Anthem..."
-
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        audioManager?.setStreamVolume(
-            AudioManager.STREAM_MUSIC,
-            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
-            0
+    private fun openAppByName(name: String): Boolean {
+        val clean = name.lowercase().trim()
+        val directMap = mapOf(
+            "whatsapp" to "com.whatsapp",
+            "youtube" to "com.google.android.youtube",
+            "chrome" to "com.android.chrome",
+            "browser" to "com.android.chrome",
+            "spotify" to "com.spotify.music",
+            "camera" to "com.sec.android.app.camera",
+            "gallery" to "com.sec.android.gallery3d",
+            "photos" to "com.google.android.apps.photos",
+            "calculator" to "com.sec.android.app.popupcalculator",
+            "settings" to "com.android.settings",
+            "maps" to "com.google.android.apps.maps",
+            "google maps" to "com.google.android.apps.maps",
+            "gmail" to "com.google.android.gm",
+            "email" to "com.google.android.gm",
+            "instagram" to "com.instagram.android",
+            "telegram" to "org.telegram.messenger",
+            "clock" to "com.sec.android.app.clockpackage",
+            "phone" to "com.samsung.android.dialer",
+            "messages" to "com.google.android.apps.messaging"
         )
 
-        // Strobe flashlight 3 times
-        GhostPilot.strobeFlashlight(this)
-
-        // Dispatch desktop bridge alert safely in background if configured
-        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        val bridgeUrl = prefs.getString("bridge_url", "") ?: ""
-        if (bridgeUrl.isNotBlank()) {
-            scope.launch(Dispatchers.IO) {
-                try {
-                    DeviceManager(this@MainActivity).dispatchDesktopCommand(bridgeUrl, "[ASYNC] echo 'HOUSE PARTY PROTOCOL ENGAGED'")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Bridge dispatch error", e)
-                }
+        val targetPkg = directMap[clean]
+        if (targetPkg != null) {
+            val intent = packageManager.getLaunchIntentForPackage(targetPkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                return true
             }
         }
 
-        // Play AC/DC on YouTube hands-free
-        GhostPilot.playYouTube(this, "AC/DC Back in Black Iron Man")
+        // Dynamic search across all installed launcher activities
+        try {
+            val pm = packageManager
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+            val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
+            for (ri in resolveInfos) {
+                val label = ri.loadLabel(pm).toString().lowercase()
+                val pkg = ri.activityInfo.packageName.lowercase()
+                if (label.contains(clean) || clean.contains(label) || pkg.contains(clean)) {
+                    val launchIntent = pm.getLaunchIntentForPackage(ri.activityInfo.packageName)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(launchIntent)
+                        return true
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Dynamic app launch error", e)
+        }
+        return false
+    }
 
-        VoiceManager.speak("House Party Protocol engaged, Sir. Pumping Stark audio to maximum and lighting up the workshop.") {
-            runOnUiThread {
-                isProcessingCommand = false
-                binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
-                if (isHandsFreeEnabled) startAmbientWakeWordListener()
+    private fun setFlashlight(enable: Boolean) {
+        try {
+            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            for (id in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (hasFlash && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    cameraManager.setTorchMode(id, enable)
+                    return
+                }
+            }
+            val firstId = cameraManager.cameraIdList.firstOrNull()
+            if (firstId != null) {
+                cameraManager.setTorchMode(firstId, enable)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to toggle flashlight", e)
+        }
+    }
+
+    private fun executeDirectOrAccessibilityActions(actions: List<AssistantAction>) {
+        for (action in actions) {
+            when (action.type) {
+                ActionType.OPEN_APP -> {
+                    action.target?.let { openAppByName(it) }
+                }
+                ActionType.FLASHLIGHT_TOGGLE -> {
+                    setFlashlight(action.value != "false")
+                }
+                ActionType.CALL_PHONE -> {
+                    action.target?.let { DeviceManager(this).makeCall(it) }
+                }
+                ActionType.PLAY_YOUTUBE, ActionType.PLAY_SPOTIFY -> {
+                    action.target?.let { GhostPilot.playYouTube(this, it) }
+                }
+                ActionType.SET_ALARM -> {
+                    val hour = action.target?.toIntOrNull() ?: 7
+                    val min = action.value?.toIntOrNull() ?: 0
+                    DeviceManager(this).setAlarm(hour, min, action.extra ?: "Alarm")
+                }
+                else -> {
+                    // Actions requiring Accessibility (screen clicking, typing, scrolling)
+                    AssistantAccessibilityService.instance?.executeActions(listOf(action))
+                }
             }
         }
     }
@@ -622,7 +731,7 @@ class MainActivity : AppCompatActivity() {
         val hasHandsFree = isHandsFreeEnabled
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         val bridgeUrl = prefs.getString("bridge_url", "") ?: ""
-        val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank()
+        val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank() || AssistantBrain.BUNDLED_API_KEY.isNotBlank()
 
         val reportText = StringBuilder()
             .append("STARK INDUSTRIES TELEMETRY REPORT\n")
@@ -630,7 +739,7 @@ class MainActivity : AppCompatActivity() {
             .append("• Time: $time\n")
             .append("• Arc Power (Battery): $battery%\n")
             .append("• Neural Super-Brain: ").append(if (hasKey) "ONLINE (Gemini)" else "LOCAL ONLY").append("\n")
-            .append("• Ghost Pilot (Accessibility): ").append(if (hasAccess) "ARMED" else "UNAUTHORIZED").append("\n")
+            .append("• Tactical Accessibility: ").append(if (hasAccess) "ARMED" else "UNAUTHORIZED").append("\n")
             .append("• Acoustic Wake Array: ").append(if (hasHandsFree) "ONLINE" else "DISARMED").append("\n")
             .append("• Workstation Bridge: ${if (bridgeUrl.isNotBlank()) bridgeUrl else "STANDALONE (NO BRIDGE)"}\n")
             .toString()
@@ -638,32 +747,12 @@ class MainActivity : AppCompatActivity() {
         binding.tvTranscript.text = reportText
         SoundEffectManager.playConfirmChirp()
 
-        val speech = "Running comprehensive diagnostics, Sir. Arc power cell is at $battery percent. Tactical accessibility is ${if (hasAccess) "armed" else "offline"}. All primary defense grids are functional."
+        val speech = "System diagnostics complete, Sir. Arc power is at $battery percent. Neural cognition is online. All primary defense grids operational."
 
         VoiceManager.speak(speech) {
             runOnUiThread {
                 isProcessingCommand = false
                 binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
-                if (isHandsFreeEnabled) startAmbientWakeWordListener()
-            }
-        }
-    }
-
-    private fun executeStealthProtocol() {
-        stopAmbientWakeWordListener()
-        isProcessingCommand = true
-        binding.tvCoreState.text = "STEALTH PROTOCOL"
-        binding.tvTranscript.text = "🛡️ STEALTH PROTOCOL ENGAGED\nSilent audio // Sentry armed // Low-profile HUD"
-
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        audioManager?.ringerMode = AudioManager.RINGER_MODE_VIBRATE
-
-        SecuritySentinel.setSentryMode(this, true)
-
-        VoiceManager.speak("Stealth protocol armed, Sir. Silent running.") {
-            runOnUiThread {
-                isProcessingCommand = false
-                binding.tvCoreState.text = "STEALTH ACTIVE // SENTRY ARMED"
                 if (isHandsFreeEnabled) startAmbientWakeWordListener()
             }
         }
@@ -750,7 +839,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (actions.isNotEmpty()) {
-                AssistantAccessibilityService.instance?.executeActions(actions)
+                executeDirectOrAccessibilityActions(actions)
             }
 
             VoiceManager.onTurnComplete {
@@ -770,25 +859,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleUserInput(input: String) {
-        // Intercept Stark Tactical Protocols
-        val lower = input.lowercase().trim()
-        if (lower.contains("clean slate")) {
-            executeCleanSlateProtocol()
-            return
-        }
-        if (lower.contains("house party")) {
-            executeHousePartyProtocol()
-            return
-        }
-        if (lower.contains("diagnostics") || lower.contains("status report") || lower.contains("system status")) {
+        val cleanInput = input.trim()
+        if (cleanInput.isBlank()) return
+
+        if (cleanInput.equals("diagnostics", ignoreCase = true) || cleanInput.equals("status report", ignoreCase = true)) {
             executeDiagnosticsProtocol()
             return
         }
-        if (lower.contains("stealth protocol") || lower.contains("stealth mode")) {
-            executeStealthProtocol()
-            return
-        }
-        if (lower.contains("calibrate voice") || lower.contains("train voice") || lower.contains("train my voice")) {
+        if (cleanInput.contains("calibrate voice", ignoreCase = true) || cleanInput.contains("train voice", ignoreCase = true)) {
             startVoiceCalibration()
             return
         }
@@ -796,17 +874,24 @@ class MainActivity : AppCompatActivity() {
         stopAmbientWakeWordListener()
         isProcessingCommand = true
 
-        binding.tvTranscript.text = "You: $input\n\nJarvis: "
-        binding.tvCoreState.text = "THINKING..."
+        binding.tvTranscript.text = "You: $cleanInput\n\nJarvis: "
+        binding.tvCoreState.text = "PROCESSING..."
         VoiceManager.resetSpeechTurn()
 
+        // 1. Direct Native Actions (Zero-latency, 100% reliable execution)
+        if (tryHandleDirectCommand(cleanInput)) {
+            return
+        }
+
+        // 2. Real-Time Central Super-Intelligence (Gemini)
+        binding.tvCoreState.text = "THINKING..."
         scope.launch {
             val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
             val apiKey = prefs.getString("gemini_api_key", null)
-            val liveTranscript = StringBuilder("You: $input\n\nJarvis: ")
+            val liveTranscript = StringBuilder("You: $cleanInput\n\nJarvis: ")
 
-            val (finalSpeech, actions) = brain.processCommandStream(input, apiKey) { sentenceChunk ->
-                // Streams sentence audio in real-time under 400ms
+            val (finalSpeech, actions) = brain.processCommandStream(cleanInput, apiKey) { sentenceChunk ->
+                // Streams sentence audio in real-time
                 runOnUiThread {
                     liveTranscript.append(sentenceChunk).append(" ")
                     binding.tvTranscript.text = liveTranscript.toString()
@@ -816,19 +901,19 @@ class MainActivity : AppCompatActivity() {
             }
 
             runOnUiThread {
-                binding.tvTranscript.text = "You: $input\n\nJarvis: $finalSpeech"
+                binding.tvTranscript.text = "You: $cleanInput\n\nJarvis: $finalSpeech"
                 binding.tvCoreState.text = "SPEAKING..."
                 SoundEffectManager.playConfirmChirp()
             }
 
-            // Execute device actions
+            // Execute actions directly on the device
             if (actions.isNotEmpty()) {
-                AssistantAccessibilityService.instance?.executeActions(actions)
+                executeDirectOrAccessibilityActions(actions)
             }
 
             VoiceManager.onTurnComplete {
                 scope.launch {
-                    delay(700) // Acoustic echo decay buffer
+                    delay(600)
                     runOnUiThread {
                         isProcessingCommand = false
                         setCoreActive(false)
