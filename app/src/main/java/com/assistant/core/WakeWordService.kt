@@ -34,6 +34,7 @@ class WakeWordService : Service() {
         private const val TAG = "WakeWordService"
         private const val CHANNEL_ID = "jarvis_wake_channel"
         private const val NOTIFICATION_ID = 1002
+        private val WAKE_WORD_REGEX = Regex("""\b(hey\s+|ok\s+|hello\s+)?jarvis\b""", RegexOption.IGNORE_CASE)
 
         @Volatile
         var isListening = false
@@ -105,7 +106,7 @@ class WakeWordService : Service() {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("J.A.R.V.I.S. Acoustic Array Active")
-            .setContentText("Hands-free ear online // Listening for 'Hey Jarvis'")
+            .setContentText("Acoustic sensor online // Listening for 'Hey Jarvis'")
             .setSmallIcon(R.drawable.arc_reactor_bubble)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -140,9 +141,9 @@ class WakeWordService : Service() {
 
                     override fun onError(error: Int) {
                         isListening = false
-                        // Restart unless Jarvis is speaking
+                        // Calm 1200ms delay to avoid loop thrashing
                         scope.launch {
-                            delay(500)
+                            delay(1200)
                             if (!VoiceManager.isCurrentlySpeaking()) {
                                 restartRecognizer()
                             }
@@ -152,16 +153,12 @@ class WakeWordService : Service() {
                     override fun onResults(results: Bundle?) {
                         isListening = false
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val spoken = matches?.firstOrNull()?.lowercase() ?: ""
+                        val spoken = matches?.firstOrNull()?.trim() ?: ""
                         handleDetectedUtterance(spoken)
                     }
 
                     override fun onPartialResults(partialResults: Bundle?) {
-                        val partialMatches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val partial = partialMatches?.firstOrNull()?.lowercase() ?: ""
-                        if (partial.contains("jarvis") || partial.contains("hey jarvis")) {
-                            speechRecognizer?.stopListening()
-                        }
+                        // Ignored to avoid intermediate false-positives
                     }
 
                     override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -178,7 +175,7 @@ class WakeWordService : Service() {
         if (VoiceManager.isCurrentlySpeaking()) {
             VoiceManager.onTurnComplete {
                 scope.launch {
-                    delay(300)
+                    delay(700)
                     restartRecognizer()
                 }
             }
@@ -189,7 +186,6 @@ class WakeWordService : Service() {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.UK.toString())
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
             speechRecognizer?.startListening(intent)
@@ -199,11 +195,10 @@ class WakeWordService : Service() {
     }
 
     private fun handleDetectedUtterance(text: String) {
-        if (text.contains("jarvis")) {
+        if (WAKE_WORD_REGEX.containsMatchIn(text)) {
             SoundEffectManager.playWakeChime()
 
-            // Extract trailing command if user said "Hey Jarvis what time is it"
-            val command = text.substringAfter("jarvis").trim().removePrefix(",").trim()
+            val command = text.replace(WAKE_WORD_REGEX, "").trim().removePrefix(",").trim()
 
             if (command.isNotBlank()) {
                 scope.launch {
@@ -217,14 +212,13 @@ class WakeWordService : Service() {
                     }
                     VoiceManager.onTurnComplete {
                         scope.launch {
-                            delay(600)
+                            delay(700)
                             restartRecognizer()
                         }
                     }
                 }
             } else {
                 // User said "Hey Jarvis" with no trailing query
-                // Bring MainActivity to front and prompt them
                 val bringToFront = Intent(this, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     putExtra("AUTO_LISTEN", true)
@@ -233,15 +227,15 @@ class WakeWordService : Service() {
 
                 VoiceManager.speak("At your service, Sir.") {
                     scope.launch {
-                        delay(400)
+                        delay(600)
                         restartRecognizer()
                     }
                 }
             }
         } else {
-            // Did not match wake word, restart loop
+            // Did not match wake word, restart loop calmly
             scope.launch {
-                delay(300)
+                delay(800)
                 restartRecognizer()
             }
         }

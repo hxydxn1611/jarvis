@@ -9,6 +9,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -30,7 +31,22 @@ object VoiceManager : TextToSpeech.OnInitListener {
 
     fun init(context: Context) {
         if (tts == null) {
-            tts = TextToSpeech(context.applicationContext, this)
+            // Prioritize Google TTS Engine which contains authentic British Male voices
+            val googleTtsPackage = "com.google.android.tts"
+            val isGoogleTtsInstalled = try {
+                context.packageManager.getPackageInfo(googleTtsPackage, 0)
+                true
+            } catch (e: Exception) {
+                false
+            }
+
+            if (isGoogleTtsInstalled) {
+                Log.i(TAG, "Initializing TTS with Google Engine (British Male priority)")
+                tts = TextToSpeech(context.applicationContext, this, googleTtsPackage)
+            } else {
+                Log.i(TAG, "Initializing TTS with Default System Engine")
+                tts = TextToSpeech(context.applicationContext, this)
+            }
         }
     }
 
@@ -39,7 +55,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
             configureBritishMaleVoice()
             setupUtteranceListener()
             isTtsReady = true
-            Log.i(TAG, "Jarvis British Male TTS Engine Initialized.")
+            Log.i(TAG, "Jarvis British Male TTS Engine Online.")
         }
     }
 
@@ -47,29 +63,54 @@ object VoiceManager : TextToSpeech.OnInitListener {
         val ukLocale = Locale.UK
         tts?.language = ukLocale
 
-        // Look for British Male voice in installed system voice list
+        // Strictly search for British / English MALE voice
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             val voices = tts?.voices
             if (!voices.isNullOrEmpty()) {
-                val maleUkVoice = voices.firstOrNull { voice ->
-                    val isUk = voice.locale.country.equals("GB", ignoreCase = true) || voice.locale.language.equals("en", ignoreCase = true)
-                    val isMale = voice.name.contains("male", ignoreCase = true) ||
-                                 voice.name.contains("en-gb-x-rjs#male", ignoreCase = true) ||
-                                 voice.name.contains("en-gb-x-gba", ignoreCase = true)
-                    isUk && isMale
-                } ?: voices.firstOrNull { voice ->
-                    voice.locale.country.equals("GB", ignoreCase = true) && !voice.name.contains("female", ignoreCase = true)
+                // Tier 1: British Male voices (e.g. en-gb-x-rjs-local, en-gb-x-gbd, en_gb_m01)
+                val ukMale = voices.firstOrNull { voice ->
+                    val isUk = voice.locale.country.equals("GB", ignoreCase = true) || 
+                               voice.locale.language.equals("en", ignoreCase = true)
+                    val name = voice.name.lowercase()
+                    val isExplicitlyMale = (name.contains("male") || name.contains("rjs") || 
+                                           name.contains("gbd") || name.contains("gba") || 
+                                           name.contains("gbb") || name.contains("_m0") || 
+                                           name.contains("-m0")) && 
+                                           !name.contains("female") && !name.contains("_f0") && !name.contains("-f0")
+                    isUk && isExplicitlyMale
                 }
 
-                if (maleUkVoice != null) {
-                    tts?.voice = maleUkVoice
+                // Tier 2: Any English Male voice
+                val anyEnglishMale = voices.firstOrNull { voice ->
+                    val isEnglish = voice.locale.language.equals("en", ignoreCase = true)
+                    val name = voice.name.lowercase()
+                    val isExplicitlyMale = (name.contains("male") || name.contains("man") || 
+                                           name.contains("rjs") || name.contains("gbd") || 
+                                           name.contains("sfg") || name.contains("iol") || 
+                                           name.contains("_m0") || name.contains("-m0")) && 
+                                           !name.contains("female") && !name.contains("_f0") && !name.contains("-f0")
+                    isEnglish && isExplicitlyMale
+                }
+
+                // Tier 3: Non-female voice fallback
+                val nonFemaleVoice = voices.firstOrNull { voice ->
+                    val isEnglish = voice.locale.language.equals("en", ignoreCase = true)
+                    val name = voice.name.lowercase()
+                    isEnglish && !name.contains("female") && !name.contains("woman") && 
+                                !name.contains("_f0") && !name.contains("-f0") && !name.contains("zira")
+                }
+
+                val selectedVoice = ukMale ?: anyEnglishMale ?: nonFemaleVoice
+                if (selectedVoice != null) {
+                    tts?.voice = selectedVoice
+                    Log.i(TAG, "Selected Male TTS Voice: ${selectedVoice.name} (${selectedVoice.locale})")
                 }
             }
         }
 
-        // Authentic British male baritone pitch & speech rate
-        tts?.setPitch(0.84f)
-        tts?.setSpeechRate(1.02f)
+        // Deep baritone British pitch (0.78f) and natural speech tempo
+        tts?.setPitch(0.78f)
+        tts?.setSpeechRate(1.00f)
     }
 
     private fun setupUtteranceListener() {
@@ -84,7 +125,6 @@ object VoiceManager : TextToSpeech.OnInitListener {
                     cb?.invoke()
                 }
 
-                // If no more utterances queued
                 if (speechCallbacks.isEmpty() && tts?.isSpeaking != true) {
                     isSpeaking = false
                     val finalCb = turnCompletionCallback
@@ -128,7 +168,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
             tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             hasStartedSpeakingCurrentTurn = true
         } else {
-            // Subsequent chunks: Queue seamlessly behind the current sentence
+            // Subsequent chunks: Queue seamlessly behind current sentence
             tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, utteranceId)
         }
     }
@@ -160,7 +200,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
     }
 
     fun listen(context: Context, onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
-        // Stop any active speech before listening to prevent microphone feedback
+        // Stop any active speech before listening to prevent acoustic feedback
         stopSpeaking()
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -174,7 +214,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
 
-            // INSTANT CUTOFF: Stop listening 450ms after user finishes talking
+            // Stop listening 450ms after user finishes talking
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
