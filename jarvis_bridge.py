@@ -48,23 +48,45 @@ class JarvisBridgeHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(post_data.decode('utf-8'))
             command = payload.get("command", "")
+            is_async = payload.get("async", False) or command.startswith("[ASYNC]")
             
             print(f"\n[JARVIS REMOTE DIRECTIVE RECEIVED]: {command}")
             
-            # Execute desktop shell / project command
-            result = subprocess.run(
-                ["powershell", "-Command", command],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            response = {
-                "success": result.returncode == 0,
-                "stdout": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
-                "summary": f"Executed on PC workstation: {command}"
-            }
+            if is_async:
+                clean_cmd = command.removeprefix("[ASYNC]").strip()
+                def run_async_worker(cmd):
+                    try:
+                        print(f"[JARVIS ASYNC WORKER RUNNING]: {cmd}")
+                        res = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True, timeout=600)
+                        with open(".jarvis_last_job.txt", "w", encoding="utf-8") as f:
+                            f.write(f"[JOB_COMPLETED: {cmd}]\nStatus: {'Success' if res.returncode == 0 else 'Failed'}\nOutput: {res.stdout[:150]}")
+                        print(f"[JARVIS ASYNC WORKER COMPLETED]: {cmd}")
+                    except Exception as ex:
+                        with open(".jarvis_last_job.txt", "w", encoding="utf-8") as f:
+                            f.write(f"[JOB_COMPLETED: {cmd} with anomaly: {ex}]")
+
+                threading.Thread(target=run_async_worker, args=(clean_cmd,), daemon=True).start()
+                response = {
+                    "success": True,
+                    "stdout": "Task dispatched to background worker.",
+                    "stderr": "",
+                    "summary": f"Autonomous PC task launched: '{clean_cmd}'. I shall notify you when complete, Sir."
+                }
+            else:
+                # Synchronous desktop shell / project command
+                result = subprocess.run(
+                    ["powershell", "-Command", command],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                
+                response = {
+                    "success": result.returncode == 0,
+                    "stdout": result.stdout.strip(),
+                    "stderr": result.stderr.strip(),
+                    "summary": f"Executed on PC workstation: {command}"
+                }
         except Exception as e:
             response = {
                 "success": False,

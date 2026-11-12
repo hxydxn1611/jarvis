@@ -7,7 +7,9 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -47,6 +49,7 @@ class AssistantBrain(private val context: Context) {
                 val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, apiKey, onSentenceStream)
                 conversationHistory.add(Pair(cleanCmd, speech))
                 if (conversationHistory.size > 8) conversationHistory.removeAt(0)
+                triggerAsyncKnowledgeExtraction(cleanCmd, speech, apiKey)
                 return Pair(speech, cloudActions)
             } catch (e: Exception) {
                 Log.e("AssistantBrain", "Streaming cloud reasoning failed, falling back to local core", e)
@@ -77,6 +80,7 @@ class AssistantBrain(private val context: Context) {
         val batteryLvl = deviceManager.getBatteryLevel()
         val locationCoords = deviceManager.getLocationCoordinates()
         val userKnowledge = MemoryCore.dumpKnowledgeContext(context)
+        val knowledgeGraphContext = KnowledgeGraph.buildPromptContext(context)
 
         val historyPrompt = conversationHistory.takeLast(4).joinToString("\n") { (u, a) ->
             "User: $u\nJarvis: $a"
@@ -92,6 +96,7 @@ class AssistantBrain(private val context: Context) {
             - GPS Coordinates: $locationCoords
             - System Update Status: $systemUpdateTime
             - User Knowledge: $userKnowledge
+            - Semantic Memory Graph: $knowledgeGraphContext
             - On-Screen Elements: [$screenContext]
             - Recent Notifications: [$recentNotifs]
             
@@ -108,6 +113,8 @@ class AssistantBrain(private val context: Context) {
             Action types allowed:
             - CALL_PHONE (target: name or number)
             - SEND_EMAIL (target: email, value: subject, extra: body)
+            - SEND_WHATSAPP (target: contact name or number, value: message)
+            - PLAY_YOUTUBE (target: query or song title)
             - SET_ALARM (target: hour, value: minute, extra: label)
             - PLAY_SPOTIFY (target: song or artist)
             - FLASHLIGHT_TOGGLE (value: "true" or "false")
@@ -115,14 +122,18 @@ class AssistantBrain(private val context: Context) {
             - OPEN_APP (target: package.name)
             - CLICK_TEXT (target: button text)
             - TYPE_TEXT (value: text)
-            - DISPATCH_DESKTOP_COMMAND (target: powershell command on PC workstation, e.g. "git status", "run build", or script execution)
+            - DISPATCH_DESKTOP_COMMAND (target: powershell command on PC workstation, e.g. "git status", or prefix with "[ASYNC] " for background builds/tests)
+            - TOGGLE_SENTRY_MODE (value: "true" to arm House Protocol, "false" to disarm)
             - INSPECT_SCREEN
             - MORNING_BRIEFING
             - SCROLL_DOWN / SCROLL_UP / GLOBAL_HOME / GLOBAL_BACK / TAKE_SCREENSHOT
             
             SPECIAL BEHAVIORS:
             - If user greets with "Good morning", "morning briefing", or asks for "status report" / "system diagnostics", deliver a full, crisp, tactical morning report summarizing time, battery, One UI update status, and workshop readiness.
-            - If user asks to execute project work, terminal commands, or talk to their PC workstation / Antigravity workspace, acknowledge in your British tone and append DISPATCH_DESKTOP_COMMAND.
+            - If user asks to execute project work, terminal commands, or talk to their PC workstation / Antigravity workspace, acknowledge in your British tone and append DISPATCH_DESKTOP_COMMAND. Use "[ASYNC] " prefix for tasks that may take more than a few seconds.
+            - If user asks to send WhatsApp to someone, generate SEND_WHATSAPP action.
+            - If user asks to play a video or music on YouTube, generate PLAY_YOUTUBE action.
+            - If user asks to activate House Protocol or security sentry, generate TOGGLE_SENTRY_MODE with value "true".
             
             If no device action is needed, DO NOT write [ACTIONS: ...]. Just answer conversationally.
             
@@ -452,6 +463,57 @@ class AssistantBrain(private val context: Context) {
             "instagram" -> "com.instagram.android"
             "telegram" -> "org.telegram.messenger"
             else -> null
+        }
+    }
+
+    private fun triggerAsyncKnowledgeExtraction(userQuery: String, aiResponse: String, apiKey: String?) {
+        if (apiKey.isNullOrBlank()) return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prompt = """
+                    Analyze this exchange between user and J.A.R.V.I.S.:
+                    User: $userQuery
+                    Jarvis: $aiResponse
+                    
+                    Extract any new permanent facts, user habits, rules, preferences, or personal relationships.
+                    Return ONLY a JSON array, like:
+                    [{"category":"PREFERENCE","key":"coffee","fact":"Prefers dark roast"}]
+                    If nothing new to extract, return [].
+                """.trimIndent()
+
+                val body = JsonObject().apply {
+                    val contents = JsonArray()
+                    val c = JsonObject()
+                    val parts = JsonArray()
+                    val p = JsonObject()
+                    p.addProperty("text", prompt)
+                    parts.add(p)
+                    c.add("parts", parts)
+                    contents.add(c)
+                    add("contents", contents)
+                }
+
+                val req = Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$apiKey")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val res = httpClient.newCall(req).execute()
+                if (res.isSuccessful) {
+                    val text = res.body?.string() ?: ""
+                    if (text.contains("[") && text.contains("]")) {
+                        val jsonPart = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1)
+                        val type = object : com.google.gson.reflect.TypeToken<List<MemoryNode>>() {}.type
+                        val extracted: List<MemoryNode> = gson.fromJson(jsonPart, type) ?: emptyList()
+                        if (extracted.isNotEmpty()) {
+                            KnowledgeGraph.saveMultipleNodes(context, extracted)
+                            Log.i("AssistantBrain", "Indexed ${extracted.size} memory nodes into KnowledgeGraph.")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Background knowledge extraction is non-blocking
+            }
         }
     }
 }

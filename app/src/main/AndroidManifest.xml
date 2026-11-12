@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" 
         tools:ignore="QueryAllPackagesPermission" />
@@ -68,6 +69,19 @@
             android:name=".FloatingAssistantService"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- Proactive Autonomous Monitor Service -->
+        <service
+            android:name=".ProactiveMonitorService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Continuous Hands-Free Wake-Word Service -->
+        <service
+            android:name=".WakeWordService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
     </application>
 

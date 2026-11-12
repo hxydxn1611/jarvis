@@ -142,6 +142,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        SoundEffectManager.playWakeChime()
         setCoreActive(true)
         binding.tvCoreState.text = "LISTENING..."
         binding.tvTranscript.text = "Listening to you, Sir..."
@@ -223,6 +224,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 binding.tvTranscript.text = "You: $input\n\nJarvis: $finalSpeech"
                 binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+                SoundEffectManager.playConfirmChirp()
             }
 
             // Execute device actions
@@ -251,6 +253,8 @@ class MainActivity : AppCompatActivity() {
         val btnSave = view.findViewById<MaterialButton>(R.id.btn_dialog_save)
         val btnAccess = view.findViewById<MaterialButton>(R.id.btn_perm_access)
         val btnOverlay = view.findViewById<MaterialButton>(R.id.btn_perm_overlay)
+        val btnWakeWord = view.findViewById<MaterialButton>(R.id.btn_perm_wakeword)
+        val btnSentry = view.findViewById<MaterialButton>(R.id.btn_perm_sentry)
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         etKey.setText(prefs.getString("gemini_api_key", ""))
@@ -286,6 +290,26 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        btnWakeWord.setOnClickListener {
+            if (WakeWordService.isListening) {
+                stopService(Intent(this, WakeWordService::class.java))
+                Toast.makeText(this, "Wake Array Disarmed", Toast.LENGTH_SHORT).show()
+            } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(Intent(this, WakeWordService::class.java))
+                } else {
+                    startService(Intent(this, WakeWordService::class.java))
+                }
+                Toast.makeText(this, "Hands-Free Wake Array Active ('Hey Jarvis')", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnSentry.setOnClickListener {
+            val active = SecuritySentinel.isSentryModeActive(this)
+            SecuritySentinel.setSentryMode(this, !active)
+            Toast.makeText(this, if (!active) "House Protocol Armed!" else "House Protocol Disarmed", Toast.LENGTH_SHORT).show()
+        }
+
         dialog.show()
     }
 
@@ -299,8 +323,16 @@ class MainActivity : AppCompatActivity() {
             binding.tvPermMessage.text = "Grant $missing permission for full control."
         } else {
             binding.cardPermissionAlert.visibility = View.GONE
-            // Auto start floating orb if authorized
+            // Auto start floating orb and proactive telemetry if authorized
             startService(Intent(this, FloatingAssistantService::class.java))
+            if (!ProactiveMonitorService.isRunning) {
+                val proactiveIntent = Intent(this, ProactiveMonitorService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(proactiveIntent)
+                } else {
+                    startService(proactiveIntent)
+                }
+            }
         }
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
