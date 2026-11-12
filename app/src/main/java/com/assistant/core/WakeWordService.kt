@@ -204,7 +204,7 @@ class WakeWordService : Service() {
         var command = ""
 
         val wakeRegexes = listOf(
-            Regex("""\b(hey|hi|hello|ok|okay|yo|a)?\s*(jarvis|jervis|jarves|javis|jarviz|travis|service)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(hey|hi|hello|ok|okay|yo)?\s*(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
             Regex("""\bjarvis\b""", RegexOption.IGNORE_CASE),
             Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
         )

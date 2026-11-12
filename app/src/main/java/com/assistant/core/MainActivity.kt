@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        isHandsFreeEnabled = prefs.getBoolean("hands_free_wake_word", true)
+        isHandsFreeEnabled = prefs.getBoolean("hands_free_wake_word", false)
 
         brain = AssistantBrain(this)
         VoiceManager.init(this)
@@ -118,6 +118,8 @@ class MainActivity : AppCompatActivity() {
 
         if (isHandsFreeEnabled && !isProcessingCommand) {
             startAmbientWakeWordListener()
+        } else {
+            binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
         }
     }
 
@@ -307,9 +309,9 @@ class MainActivity : AppCompatActivity() {
                             isAmbientListening = false
                             if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
                                 scope.launch {
-                                    delay(650)
+                                    delay(2500)
                                     if (isHandsFreeEnabled && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
-                                        restartAmbientListener()
+                                        startAmbientWakeWordListener()
                                     }
                                 }
                             }
@@ -418,7 +420,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun evaluateWakeMatch(candidates: List<String>, customSignatures: Set<String>): Pair<Boolean, String> {
         val wakeRegexes = listOf(
-            Regex("""\b(hey|hi|hello|ok|okay|yo|a)?\s*(jarvis|jervis|jarves|javis|jarviz|travis|service)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(hey|hi|hello|ok|okay|yo)?\s*(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
             Regex("""\bjarvis\b""", RegexOption.IGNORE_CASE),
             Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
         )
@@ -487,7 +489,13 @@ class MainActivity : AppCompatActivity() {
                                     val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
                                     val existing = prefs.getStringSet("custom_wake_signatures", emptySet())?.toMutableSet() ?: mutableSetOf()
                                     existing.addAll(matches.map { it.lowercase().trim() })
-                                    prefs.edit().putStringSet("custom_wake_signatures", existing).apply()
+                                    prefs.edit()
+                                        .putStringSet("custom_wake_signatures", existing)
+                                        .putBoolean("hands_free_wake_word", true)
+                                        .apply()
+
+                                    isHandsFreeEnabled = true
+                                    updateHandsFreePill()
 
                                     KnowledgeGraph.saveNode(
                                         this@MainActivity,
@@ -497,11 +505,11 @@ class MainActivity : AppCompatActivity() {
                                     )
 
                                     SoundEffectManager.playConfirmChirp()
-                                    binding.tvTranscript.text = "Jarvis: Voice profile locked and calibrated, Sir!\nRegistered signatures: ${matches.take(3).joinToString()}"
-                                    binding.tvCoreState.text = "VOICE CALIBRATED // READY"
-                                    Toast.makeText(this@MainActivity, "Voice Calibrated Successfully!", Toast.LENGTH_SHORT).show()
+                                    binding.tvTranscript.text = "Jarvis: Voice profile locked and calibrated, Sir!\nHands-Free Wake is now armed."
+                                    binding.tvCoreState.text = "VOICE CALIBRATED // WAKE ARMED"
+                                    Toast.makeText(this@MainActivity, "Voice Calibrated & Hands-Free Armed!", Toast.LENGTH_SHORT).show()
 
-                                    VoiceManager.speak("Voice signature locked and synchronized, Sir. I am calibrated to your voice.") {
+                                    VoiceManager.speak("Voice signature locked and synchronized, Sir. Hands-Free is now armed and listening for you.") {
                                         runOnUiThread {
                                             isProcessingCommand = false
                                             setCoreActive(false)

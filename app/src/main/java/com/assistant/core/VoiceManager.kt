@@ -31,21 +31,11 @@ object VoiceManager : TextToSpeech.OnInitListener {
 
     fun init(context: Context) {
         if (tts == null) {
-            // Prioritize Google TTS Engine which contains authentic British Male voices
-            val googleTtsPackage = "com.google.android.tts"
-            val isGoogleTtsInstalled = try {
-                context.packageManager.getPackageInfo(googleTtsPackage, 0)
-                true
-            } catch (e: Exception) {
-                false
-            }
-
-            if (isGoogleTtsInstalled) {
-                Log.i(TAG, "Initializing TTS with Google Engine (British Male priority)")
-                tts = TextToSpeech(context.applicationContext, this, googleTtsPackage)
-            } else {
-                Log.i(TAG, "Initializing TTS with Default System Engine")
+            try {
+                Log.i(TAG, "Initializing System TextToSpeech Engine")
                 tts = TextToSpeech(context.applicationContext, this)
+            } catch (e: Exception) {
+                Log.e(TAG, "TTS initialization failed", e)
             }
         }
     }
