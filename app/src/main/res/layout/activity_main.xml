@@ -152,7 +152,7 @@
         android:id="@+id/tv_core_state"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="STANDBY // SAY 'HEY JARVIS'"
+        android:text="STANDBY // TAP TO SPEAK"
         android:textColor="#81D4FA"
         android:textSize="12sp"
         android:fontFamily="monospace"

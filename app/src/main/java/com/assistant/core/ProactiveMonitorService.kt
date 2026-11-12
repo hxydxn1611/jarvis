@@ -98,15 +98,20 @@ class ProactiveMonitorService : Service() {
 
     private suspend fun auditDesktopWorkstationJobs() {
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: return
+        val bridgeUrl = prefs.getString("bridge_url", "") ?: return
+        if (bridgeUrl.isBlank()) return
         
         try {
             val deviceManager = DeviceManager(this)
-            val jobResult = deviceManager.dispatchDesktopCommand(bridgeUrl, "Get-Content -Path .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+            val jobResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                deviceManager.dispatchDesktopCommand(bridgeUrl, "Get-Content -Path .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+            }
             if (jobResult.isNotBlank() && jobResult.contains("[JOB_COMPLETED:")) {
                 val jobTitle = jobResult.substringAfter("[JOB_COMPLETED:").substringBefore("]")
                 // Clear the flag so it only alerts once
-                deviceManager.dispatchDesktopCommand(bridgeUrl, "Remove-Item .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    deviceManager.dispatchDesktopCommand(bridgeUrl, "Remove-Item .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                }
                 SoundEffectManager.playConfirmChirp()
                 VoiceManager.speak("Sir, your workstation has completed the background task: $jobTitle.")
             }

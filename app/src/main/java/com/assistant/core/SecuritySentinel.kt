@@ -46,7 +46,8 @@ object SecuritySentinel {
                 val batt = deviceManager.getBatteryLevel()
 
                 val prefs = context.getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-                val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: return@launch
+                val bridgeUrl = prefs.getString("bridge_url", "") ?: return@launch
+                if (bridgeUrl.isBlank()) return@launch
 
                 val cmd = "Write-Output '[SECURITY BREACH ALERT]: Unauthorized access attempt at $time. Location: $coords. Battery: $batt%' | Out-File -Append -FilePath .jarvis_security_log.txt"
                 deviceManager.dispatchDesktopCommand(bridgeUrl, cmd)

@@ -63,12 +63,16 @@ class AssistantAccessibilityService : AccessibilityService() {
                     }
 
                     val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-                    val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888")
+                    val bridgeUrl = prefs.getString("bridge_url", "")
                     if (!bridgeUrl.isNullOrBlank()) {
-                        val jobResult = deviceManager.dispatchDesktopCommand(bridgeUrl, "Get-Content -Path .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                        val jobResult = withContext(Dispatchers.IO) {
+                            deviceManager.dispatchDesktopCommand(bridgeUrl, "Get-Content -Path .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                        }
                         if (jobResult.isNotBlank() && jobResult.contains("[JOB_COMPLETED:")) {
                             val jobTitle = jobResult.substringAfter("[JOB_COMPLETED:").substringBefore("]")
-                            deviceManager.dispatchDesktopCommand(bridgeUrl, "Remove-Item .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                            withContext(Dispatchers.IO) {
+                                deviceManager.dispatchDesktopCommand(bridgeUrl, "Remove-Item .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                            }
                             SoundEffectManager.playConfirmChirp()
                             VoiceManager.speak("Sir, your workstation has completed the background task: $jobTitle.")
                         }
@@ -209,13 +213,17 @@ class AssistantAccessibilityService : AccessibilityService() {
                     }
                     ActionType.DISPATCH_DESKTOP_COMMAND -> {
                         action.target?.let { cmd ->
-                            kotlinx.coroutines.withContext(Dispatchers.IO) {
-                                val prefs = getSharedPreferences("AssistantPrefs", android.content.Context.MODE_PRIVATE)
-                                val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: "http://192.168.1.4:8888"
-                                val result = deviceManager.dispatchDesktopCommand(bridgeUrl, cmd)
+                            val prefs = getSharedPreferences("AssistantPrefs", android.content.Context.MODE_PRIVATE)
+                            val bridgeUrl = prefs.getString("bridge_url", "") ?: ""
+                            if (bridgeUrl.isNotBlank()) {
+                                val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    deviceManager.dispatchDesktopCommand(bridgeUrl, cmd)
+                                }
                                 kotlinx.coroutines.withContext(Dispatchers.Main) {
                                     VoiceManager.speak(result)
                                 }
+                            } else {
+                                VoiceManager.speak("Workstation bridge is not configured, Sir. You can enter your PC bridge URL in Jarvis settings.")
                             }
                         }
                     }

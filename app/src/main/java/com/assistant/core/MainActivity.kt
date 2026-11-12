@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var coreAnimator: ObjectAnimator? = null
 
     // Ambient Hands-Free Wake Engine
-    private var isHandsFreeEnabled = true
+    private var isHandsFreeEnabled = false
     private var ambientRecognizer: SpeechRecognizer? = null
     private var isAmbientListening = false
     private var isProcessingCommand = false
@@ -477,8 +477,8 @@ class MainActivity : AppCompatActivity() {
                                 isProcessingCommand = false
                                 calibrator.destroy()
                                 binding.tvTranscript.text = "Jarvis: Calibration timed out, Sir. Tap 'Train Voice' to try again."
-                                binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
-                                startAmbientWakeWordListener()
+                                binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                                if (isHandsFreeEnabled) startAmbientWakeWordListener()
                             }
                         }
                         override fun onResults(results: Bundle?) {
@@ -556,8 +556,8 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 isProcessingCommand = false
                 binding.tvTranscript.text = "Jarvis: Clean Slate complete, Sir. Systems standing by."
-                binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
-                startAmbientWakeWordListener()
+                binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                if (isHandsFreeEnabled) startAmbientWakeWordListener()
             }
         }
     }
@@ -578,10 +578,18 @@ class MainActivity : AppCompatActivity() {
         // Strobe flashlight 3 times
         GhostPilot.strobeFlashlight(this)
 
-        // Dispatch desktop bridge alert
+        // Dispatch desktop bridge alert safely in background if configured
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: "http://192.168.1.4:8888"
-        DeviceManager(this).dispatchDesktopCommand(bridgeUrl, "[ASYNC] echo 'HOUSE PARTY PROTOCOL ENGAGED'")
+        val bridgeUrl = prefs.getString("bridge_url", "") ?: ""
+        if (bridgeUrl.isNotBlank()) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    DeviceManager(this@MainActivity).dispatchDesktopCommand(bridgeUrl, "[ASYNC] echo 'HOUSE PARTY PROTOCOL ENGAGED'")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Bridge dispatch error", e)
+                }
+            }
+        }
 
         // Play AC/DC on YouTube hands-free
         GhostPilot.playYouTube(this, "AC/DC Back in Black Iron Man")
@@ -589,7 +597,8 @@ class MainActivity : AppCompatActivity() {
         VoiceManager.speak("House Party Protocol engaged, Sir. Pumping Stark audio to maximum and lighting up the workshop.") {
             runOnUiThread {
                 isProcessingCommand = false
-                startAmbientWakeWordListener()
+                binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                if (isHandsFreeEnabled) startAmbientWakeWordListener()
             }
         }
     }
@@ -605,7 +614,7 @@ class MainActivity : AppCompatActivity() {
         val hasAccess = AssistantAccessibilityService.isRunning
         val hasHandsFree = isHandsFreeEnabled
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: "http://192.168.1.4:8888"
+        val bridgeUrl = prefs.getString("bridge_url", "") ?: ""
         val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank()
 
         val reportText = StringBuilder()
@@ -616,7 +625,7 @@ class MainActivity : AppCompatActivity() {
             .append("• Neural Super-Brain: ").append(if (hasKey) "ONLINE (Gemini)" else "LOCAL ONLY").append("\n")
             .append("• Ghost Pilot (Accessibility): ").append(if (hasAccess) "ARMED" else "UNAUTHORIZED").append("\n")
             .append("• Acoustic Wake Array: ").append(if (hasHandsFree) "ONLINE" else "DISARMED").append("\n")
-            .append("• Workstation Bridge: $bridgeUrl\n")
+            .append("• Workstation Bridge: ${if (bridgeUrl.isNotBlank()) bridgeUrl else "STANDALONE (NO BRIDGE)"}\n")
             .toString()
 
         binding.tvTranscript.text = reportText
@@ -627,8 +636,8 @@ class MainActivity : AppCompatActivity() {
         VoiceManager.speak(speech) {
             runOnUiThread {
                 isProcessingCommand = false
-                binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
-                startAmbientWakeWordListener()
+                binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                if (isHandsFreeEnabled) startAmbientWakeWordListener()
             }
         }
     }
@@ -648,7 +657,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 isProcessingCommand = false
                 binding.tvCoreState.text = "STEALTH ACTIVE // SENTRY ARMED"
-                startAmbientWakeWordListener()
+                if (isHandsFreeEnabled) startAmbientWakeWordListener()
             }
         }
     }
@@ -848,11 +857,11 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         etKey.setText(prefs.getString("gemini_api_key", ""))
-        etBridge.setText(prefs.getString("bridge_url", "http://192.168.1.4:8888"))
+        etBridge.setText(prefs.getString("bridge_url", ""))
 
         btnSave.setOnClickListener {
             val key = etKey.text.toString().trim()
-            val bridgeUrl = etBridge.text.toString().trim().ifBlank { "http://192.168.1.4:8888" }
+            val bridgeUrl = etBridge.text.toString().trim()
             prefs.edit()
                 .putString("gemini_api_key", key)
                 .putString("bridge_url", bridgeUrl)
