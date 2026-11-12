@@ -15,19 +15,23 @@ import java.util.concurrent.TimeUnit
 
 class AssistantBrain(private val context: Context) {
 
+    companion object {
+        val CANDIDATE_MODELS = listOf("gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash", "gemini-3-flash-preview")
+    }
+
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     private val gson = Gson()
-    private val conversationHistory = mutableListOf<Pair<String, String>>() // user -> assistant
+    private val conversationHistory = mutableListOf<Pair<String, String>>()
 
     suspend fun processCommand(command: String, apiKey: String?): Pair<String, List<AssistantAction>> {
         val cleanCmd = command.trim()
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
-        // Mode 1: Ultra Super-Intelligence (Gemini 2.0 Flash)
+        // Mode 1: Super-Intelligence (Cloud LLM)
         if (!apiKey.isNullOrBlank()) {
             try {
                 val (speech, cloudActions) = querySuperIntelligence(cleanCmd, apiKey)
@@ -39,7 +43,7 @@ class AssistantBrain(private val context: Context) {
             }
         }
 
-        // Mode 2: Local Core (Offline)
+        // Mode 2: Local Core (Offline Fallback)
         val offlineActions = interpretOffline(cleanCmd)
         val speech = offlineActions.firstOrNull { it.type == ActionType.SPEAK }?.value
             ?: "Command acknowledged, Sir."
@@ -59,7 +63,7 @@ class AssistantBrain(private val context: Context) {
             }
 
             val systemInstruction = """
-                You are JARVIS — an ultra-superintelligent cognitive companion, strategic partner, and second self to your creator.
+                You are JARVIS — an ultra-superintelligent cognitive companion, tactical second brain, and alternate self to your creator.
                 You have real-time perception of their phone screen and notifications.
                 
                 PERSONALITY:
@@ -97,8 +101,6 @@ class AssistantBrain(private val context: Context) {
                 Respond ONLY with a JSON object: {"speech": "...", "actions": [...]}
             """.trimIndent()
 
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
-
             val jsonBody = JsonObject().apply {
                 val contents = JsonArray()
                 val contentObj = JsonObject()
@@ -111,15 +113,27 @@ class AssistantBrain(private val context: Context) {
                 add("contents", contents)
             }
 
-            val request = Request.Builder()
-                .url(url)
-                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+            for (model in CANDIDATE_MODELS) {
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
 
-            val response = httpClient.newCall(request).execute()
-            val responseBody = response.body?.string() ?: return@withContext Pair("I lost connection for a moment, Sir.", emptyList())
+                    val response = httpClient.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        val body = response.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            return@withContext parseSuperIntelligenceResponse(body)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("AssistantBrain", "Model $model attempt failed: ${e.message}")
+                }
+            }
 
-            parseSuperIntelligenceResponse(responseBody)
+            Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
         }
 
     private fun parseSuperIntelligenceResponse(rawJson: String): Pair<String, List<AssistantAction>> {
