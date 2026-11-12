@@ -99,26 +99,24 @@ class FloatingAssistantService : Service() {
     }
 
     private fun onBubbleClicked() {
-        // Haptic feedback instead of voice interruption
         triggerHapticFeedback()
+        VoiceManager.resetSpeechTurn()
 
-        // Listen immediately in clean silence
         VoiceManager.listen(
             context = this,
             onResult = { spokenText ->
                 serviceScope.launch {
                     val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
                     val apiKey = prefs.getString("gemini_api_key", null)
-                    val (speech, actions) = brain.processCommand(spokenText, apiKey)
-                    VoiceManager.speak(speech)
+                    val (_, actions) = brain.processCommandStream(spokenText, apiKey) { chunk ->
+                        VoiceManager.streamSentence(chunk)
+                    }
                     if (actions.isNotEmpty()) {
                         AssistantAccessibilityService.instance?.executeActions(actions)
                     }
                 }
             },
-            onError = { _ ->
-                // Silent reset
-            }
+            onError = { _ -> }
         )
     }
 

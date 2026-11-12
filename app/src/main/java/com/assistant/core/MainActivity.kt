@@ -145,20 +145,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleUserInput(input: String) {
-        binding.tvTranscript.text = "You: $input\n\nJarvis: Processing..."
+        binding.tvTranscript.text = "You: $input\n\nJarvis: "
         binding.tvCoreState.text = "THINKING..."
+        VoiceManager.resetSpeechTurn()
 
         scope.launch {
             val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
             val apiKey = prefs.getString("gemini_api_key", null)
+            val liveTranscript = StringBuilder("You: $input\n\nJarvis: ")
 
-            val (speech, actions) = brain.processCommand(input, apiKey)
+            val (finalSpeech, actions) = brain.processCommandStream(input, apiKey) { sentenceChunk ->
+                // Plays sentence audio in real-time under 400ms
+                runOnUiThread {
+                    liveTranscript.append(sentenceChunk).append(" ")
+                    binding.tvTranscript.text = liveTranscript.toString()
+                    binding.tvCoreState.text = "SPEAKING..."
+                }
+                VoiceManager.streamSentence(sentenceChunk)
+            }
 
-            binding.tvTranscript.text = "You: $input\n\nJarvis: $speech"
-            binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
-
-            // Speak response aloud with British cadence
-            VoiceManager.speak(speech)
+            runOnUiThread {
+                binding.tvTranscript.text = "You: $input\n\nJarvis: $finalSpeech"
+                binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+            }
 
             // Execute device actions
             if (actions.isNotEmpty()) {

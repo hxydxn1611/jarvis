@@ -8,7 +8,6 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
-import android.speech.tts.Voice
 import android.util.Log
 import java.util.Locale
 
@@ -17,6 +16,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
     private const val TAG = "VoiceManager"
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
+    private var hasStartedSpeakingCurrentTurn = false
 
     fun init(context: Context) {
         if (tts == null) {
@@ -56,12 +56,33 @@ object VoiceManager : TextToSpeech.OnInitListener {
             }
         }
 
-        // Set authentic British male baritone pitch & smooth speech rate
+        // Authentic British male baritone pitch & speech rate
         tts?.setPitch(0.84f)
         tts?.setSpeechRate(1.02f)
     }
 
-    fun speak(text: String, onComplete: (() -> Unit)? = null) {
+    // --- Sub-Second Streaming Audio Queue ---
+
+    fun resetSpeechTurn() {
+        hasStartedSpeakingCurrentTurn = false
+        stopSpeaking()
+    }
+
+    fun streamSentence(sentence: String) {
+        if (!isTtsReady || sentence.isBlank()) return
+        val clean = sentence.trim()
+
+        if (!hasStartedSpeakingCurrentTurn) {
+            // First chunk: Flush any previous audio and play immediately (<400ms)
+            tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_STREAM_FIRST")
+            hasStartedSpeakingCurrentTurn = true
+        } else {
+            // Subsequent chunks: Queue seamlessly behind the current sentence
+            tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, "JARVIS_STREAM_QUEUE")
+        }
+    }
+
+    fun speak(text: String) {
         if (isTtsReady && text.isNotBlank()) {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_VOICE_UTTERANCE")
         }
@@ -72,7 +93,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
     }
 
     fun listen(context: Context, onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
-        // Stop any active speech before listening to prevent microphone feedback collision
+        // Stop any active speech before listening to prevent microphone feedback
         stopSpeaking()
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -85,6 +106,11 @@ object VoiceManager : TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+
+            // INSTANT CUTOFF: Stop listening 400ms after user finishes talking (removes 1.5s lag)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
         }
 
         recognizer.setRecognitionListener(object : RecognitionListener {

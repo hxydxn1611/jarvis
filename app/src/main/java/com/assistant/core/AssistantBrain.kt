@@ -11,36 +11,42 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
 class AssistantBrain(private val context: Context) {
 
     companion object {
-        val CANDIDATE_MODELS = listOf("gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash", "gemini-3-flash-preview")
+        val CANDIDATE_MODELS = listOf("gemini-flash-latest", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3-flash-preview")
     }
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     private val gson = Gson()
     private val conversationHistory = mutableListOf<Pair<String, String>>()
     private val deviceManager = DeviceManager(context)
 
-    suspend fun processCommand(command: String, apiKey: String?): Pair<String, List<AssistantAction>> {
+    suspend fun processCommandStream(
+        command: String,
+        apiKey: String?,
+        onSentenceStream: (String) -> Unit
+    ): Pair<String, List<AssistantAction>> {
         val cleanCmd = command.trim()
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
-        // Mode 1: Global Polymath Super-Intelligence (Gemini 3.8 / Flash with Google Search Grounding)
+        // Mode 1: Sub-Second Streaming Super-Intelligence
         if (!apiKey.isNullOrBlank()) {
             try {
-                val (speech, cloudActions) = querySuperIntelligence(cleanCmd, apiKey)
+                val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, apiKey, onSentenceStream)
                 conversationHistory.add(Pair(cleanCmd, speech))
                 if (conversationHistory.size > 8) conversationHistory.removeAt(0)
                 return Pair(speech, cloudActions)
             } catch (e: Exception) {
-                Log.e("AssistantBrain", "Cloud reasoning failed, falling back to local engine", e)
+                Log.e("AssistantBrain", "Streaming cloud reasoning failed, falling back to local core", e)
             }
         }
 
@@ -48,131 +54,203 @@ class AssistantBrain(private val context: Context) {
         val offlineActions = interpretOffline(cleanCmd)
         val speech = offlineActions.firstOrNull { it.type == ActionType.SPEAK }?.value
             ?: "Directives received, Sir."
+        onSentenceStream(speech)
         conversationHistory.add(Pair(cleanCmd, speech))
         return Pair(speech, offlineActions)
     }
 
-    private suspend fun querySuperIntelligence(command: String, apiKey: String): Pair<String, List<AssistantAction>> =
-        withContext(Dispatchers.IO) {
-            val visibleText = AssistantAccessibilityService.instance?.dumpVisibleText() ?: emptyList()
-            val screenContext = visibleText.take(25).joinToString(", ")
-            val recentNotifs = AssistantNotificationService.getRecent(4)
-                .joinToString("; ") { "${it.title}: ${it.text}" }
+    private suspend fun streamSuperIntelligence(
+        command: String,
+        apiKey: String,
+        onSentenceStream: (String) -> Unit
+    ): Pair<String, List<AssistantAction>> = withContext(Dispatchers.IO) {
+        val visibleText = AssistantAccessibilityService.instance?.dumpVisibleText() ?: emptyList()
+        val screenContext = visibleText.take(25).joinToString(", ")
+        val recentNotifs = AssistantNotificationService.getRecent(4)
+            .joinToString("; ") { "${it.title}: ${it.text}" }
 
-            val systemUpdateTime = AssistantNotificationService.checkSystemSoftwareUpdate()?.text ?: "None"
-            val currentClock = deviceManager.getFormattedSystemTime()
-            val batteryLvl = deviceManager.getBatteryLevel()
-            val locationCoords = deviceManager.getLocationCoordinates()
-            val userKnowledge = MemoryCore.dumpKnowledgeContext(context)
+        val systemUpdateTime = AssistantNotificationService.checkSystemSoftwareUpdate()?.text ?: "None"
+        val currentClock = deviceManager.getFormattedSystemTime()
+        val batteryLvl = deviceManager.getBatteryLevel()
+        val locationCoords = deviceManager.getLocationCoordinates()
+        val userKnowledge = MemoryCore.dumpKnowledgeContext(context)
 
-            val historyPrompt = conversationHistory.takeLast(4).joinToString("\n") { (u, a) ->
-                "User: $u\nJarvis: $a"
+        val historyPrompt = conversationHistory.takeLast(4).joinToString("\n") { (u, a) ->
+            "User: $u\nJarvis: $a"
+        }
+
+        val systemInstruction = """
+            You are J.A.R.V.I.S. — an ultra-superintelligent cognitive companion, tactical co-worker, and second self to your creator.
+            You possess polymath mastery across Chemistry, Physics, Advanced Math, and Code, plus direct control of this mobile device.
+            
+            REAL-TIME TELEMETRY:
+            - Device Clock: $currentClock
+            - Battery Level: $batteryLvl%
+            - GPS Coordinates: $locationCoords
+            - System Update Status: $systemUpdateTime
+            - User Knowledge: $userKnowledge
+            - On-Screen Elements: [$screenContext]
+            - Recent Notifications: [$recentNotifs]
+            
+            PERSONALITY & LATENCY:
+            - British cadence: calm, articulate, razor-sharp, tactful, dry wit.
+            - Answer the user DIRECTLY in natural conversational text on the first lines.
+            - SCIENTIFIC PRECISION: If asked for chemical reactions, formulas, physics equations, or code, provide exact balanced equations and explanations with absolute scientific mastery.
+            
+            RESPONSE FORMAT:
+            Write your conversational spoken reply first (this is streamed directly to speech audio in real-time).
+            If a device action is needed, write on a new line at the very end:
+            [ACTIONS: [{"type":"CALL_PHONE","target":"name_or_number"}]]
+            
+            Action types allowed:
+            - CALL_PHONE (target: name or number)
+            - SEND_EMAIL (target: email, value: subject, extra: body)
+            - SET_ALARM (target: hour, value: minute, extra: label)
+            - PLAY_SPOTIFY (target: song or artist)
+            - FLASHLIGHT_TOGGLE (value: "true" or "false")
+            - SAVE_MEMORY (target: key, value: fact)
+            - OPEN_APP (target: package.name)
+            - CLICK_TEXT (target: button text)
+            - TYPE_TEXT (value: text)
+            - SCROLL_DOWN / SCROLL_UP / GLOBAL_HOME / GLOBAL_BACK / TAKE_SCREENSHOT
+            
+            If no device action is needed, DO NOT write [ACTIONS: ...]. Just answer conversationally.
+            
+            RECENT CONVERSATION:
+            $historyPrompt
+            
+            USER INPUT: "$command"
+        """.trimIndent()
+
+        val jsonBody = JsonObject().apply {
+            val contents = JsonArray()
+            val contentObj = JsonObject()
+            val parts = JsonArray()
+            val partObj = JsonObject()
+            partObj.addProperty("text", systemInstruction)
+            parts.add(partObj)
+            contentObj.add("parts", parts)
+            contents.add(contentObj)
+            add("contents", contents)
+
+            // Google Search Grounding for Worldwide Web Access
+            val tools = JsonArray()
+            val searchTool = JsonObject()
+            searchTool.add("google_search", JsonObject())
+            tools.add(searchTool)
+            add("tools", tools)
+        }
+
+        for (model in CANDIDATE_MODELS) {
+            try {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$apiKey&alt=sse"
+                val request = Request.Builder()
+                    .url(url)
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val stream = response.body?.byteStream()
+                    if (stream != null) {
+                        return@withContext parseSseStream(stream, onSentenceStream)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("AssistantBrain", "Streaming model $model failed: ${e.message}")
             }
+        }
 
-            val systemInstruction = """
-                You are J.A.R.V.I.S. — an ultra-superintelligent autonomous cognitive companion, strategic partner, and scientific second brain to your creator.
-                You hold world-class polymath knowledge in Chemistry, Physics, Advanced Mathematics, Software Engineering, and Global Intelligence, coupled with full physical control of this mobile device.
-                
-                REAL-TIME TELEMETRY:
-                - Exact Device Time: $currentClock
-                - Battery Level: $batteryLvl%
-                - GPS Location: $locationCoords
-                - System Firmware Status: $systemUpdateTime
-                - Known Facts About User: $userKnowledge
-                - On-Screen Elements: [$screenContext]
-                - Recent Notifications: [$recentNotifs]
-                
-                INTELLECT & PERSONALITY:
-                - British cadence: calm, articulate, razor-sharp, tactful, dry wit.
-                - Never robotic customer-support boilerplate. You talk as an intellectual equal and tactical co-worker.
-                - SCIENTIFIC PRECISION: When the user asks about chemistry, physics, math, equations, or scientific concepts, provide exact chemical formulas (e.g. balancing equations, reaction states, molar masses), mechanisms, and explanations with absolute scientific rigor.
-                - ADAPTIVE LENGTH: If executing a phone action, be concise and polite. If answering a scientific, engineering, philosophical, or analytical question, give a thorough, crystal-clear, and intellectually satisfying explanation.
-                
-                DEVICE ACTION CAPABILITIES (Include in "actions" array when requested):
-                - {"type":"CALL_PHONE", "target":"Contact name or phone number"}
-                - {"type":"SEND_EMAIL", "target":"recipient@email.com", "value":"Subject", "extra":"Body"}
-                - {"type":"SET_ALARM", "target":"hour_0_to_23", "value":"minute_0_to_59", "extra":"Alarm label"}
-                - {"type":"PLAY_SPOTIFY", "target":"song, artist or genre"}
-                - {"type":"FLASHLIGHT_TOGGLE", "value":"true" or "false"}
-                - {"type":"SAVE_MEMORY", "target":"fact_key", "value":"fact_value"}
-                - {"type":"OPEN_APP", "target":"package.name"}
-                - {"type":"CLICK_TEXT", "target":"Button text"}
-                - {"type":"TYPE_TEXT", "value":"Text to type"}
-                - {"type":"SCROLL_DOWN"} / {"type":"SCROLL_UP"}
-                - {"type":"GLOBAL_HOME"} / {"type":"GLOBAL_BACK"} / {"type":"GLOBAL_NOTIFICATIONS"}
-                - {"type":"TAKE_SCREENSHOT"}
-                
-                RECENT CONVERSATION:
-                $historyPrompt
-                
-                USER INPUT: "$command"
-                
-                Respond ONLY with a JSON object: {"speech": "...", "actions": [...]}
-            """.trimIndent()
+        Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
+    }
 
-            val jsonBody = JsonObject().apply {
-                val contents = JsonArray()
-                val contentObj = JsonObject()
-                val parts = JsonArray()
-                val partObj = JsonObject()
-                partObj.addProperty("text", systemInstruction)
-                parts.add(partObj)
-                contentObj.add("parts", parts)
-                contents.add(contentObj)
-                add("contents", contents)
+    private fun parseSseStream(
+        inputStream: java.io.InputStream,
+        onSentenceStream: (String) -> Unit
+    ): Pair<String, List<AssistantAction>> {
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        var line: String?
+        val fullRawBuilder = StringBuilder()
+        val speechBuilder = StringBuilder()
+        var sentenceBuffer = StringBuilder()
+        var hasEncounteredActions = false
 
-                // Google Search Grounding for Worldwide Web Access
-                val tools = JsonArray()
-                val searchTool = JsonObject()
-                searchTool.add("google_search", JsonObject())
-                tools.add(searchTool)
-                add("tools", tools)
-            }
+        while (reader.readLine().also { line = it } != null) {
+            val curLine = line ?: continue
+            if (curLine.startsWith("data: ")) {
+                val jsonPart = curLine.removePrefix("data: ").trim()
+                if (jsonPart == "[DONE]") break
 
-            for (model in CANDIDATE_MODELS) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                        .build()
+                    val root = gson.fromJson(jsonPart, JsonObject::class.java)
+                    val candidates = root.getAsJsonArray("candidates") ?: continue
+                    if (candidates.size() == 0) continue
+                    val firstCandidate = candidates.get(0).asJsonObject
+                    val content = firstCandidate.getAsJsonObject("content") ?: continue
+                    val parts = content.getAsJsonArray("parts") ?: continue
 
-                    val response = httpClient.newCall(request).execute()
-                    if (response.isSuccessful) {
-                        val body = response.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            return@withContext parseSuperIntelligenceResponse(body)
+                    for (i in 0 until parts.size()) {
+                        val partText = parts.get(i).asJsonObject.get("text")?.asString ?: ""
+                        fullRawBuilder.append(partText)
+
+                        if (!hasEncounteredActions) {
+                            if (partText.contains("[ACTIONS:")) {
+                                hasEncounteredActions = true
+                                val beforeActions = partText.substringBefore("[ACTIONS:")
+                                sentenceBuffer.append(beforeActions)
+                                speechBuilder.append(beforeActions)
+                                if (sentenceBuffer.isNotBlank()) {
+                                    onSentenceStream(sentenceBuffer.toString().trim())
+                                    sentenceBuffer.clear()
+                                }
+                            } else {
+                                sentenceBuffer.append(partText)
+                                speechBuilder.append(partText)
+
+                                // Check for sentence boundary: '.', '!', '?', or '\n'
+                                val buf = sentenceBuffer.toString()
+                                val punctIdx = buf.indexOfAny(charArrayOf('.', '!', '?', '\n'))
+                                if (punctIdx != -1) {
+                                    val sentence = buf.substring(0, punctIdx + 1).trim()
+                                    val remainder = buf.substring(punctIdx + 1)
+                                    if (sentence.isNotBlank()) {
+                                        onSentenceStream(sentence)
+                                    }
+                                    sentenceBuffer = StringBuilder(remainder)
+                                }
+                            }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w("AssistantBrain", "Model $model attempt failed: ${e.message}")
+                    // Ignore transient chunk parsing anomalies
                 }
             }
-
-            Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
         }
 
-    private fun parseSuperIntelligenceResponse(rawJson: String): Pair<String, List<AssistantAction>> {
+        // Flush any remaining buffered speech
+        if (sentenceBuffer.isNotBlank() && !hasEncounteredActions) {
+            onSentenceStream(sentenceBuffer.toString().trim())
+        }
+
+        val fullText = fullRawBuilder.toString()
+        val actionsList = extractActionsFromText(fullText)
+        val finalSpeech = speechBuilder.toString().trim().ifBlank { "Acknowledged, Sir." }
+
+        return Pair(finalSpeech, actionsList)
+    }
+
+    private fun extractActionsFromText(fullText: String): List<AssistantAction> {
         return try {
-            val root = gson.fromJson(rawJson, JsonObject::class.java)
-            val candidates = root.getAsJsonArray("candidates")
-            val firstCandidate = candidates.get(0).asJsonObject
-            val content = firstCandidate.getAsJsonObject("content")
-            val parts = content.getAsJsonArray("parts")
-            val rawText = parts.get(0).asJsonObject.get("text").asString
-
-            val cleanJson = rawText.substringAfter("{").substringBeforeLast("}")
-            val wrapped = "{$cleanJson}"
-            val parsedObj = gson.fromJson(wrapped, JsonObject::class.java)
-
-            val speech = parsedObj.get("speech")?.asString ?: "Right away, Sir."
-            val actionsArray = parsedObj.getAsJsonArray("actions") ?: JsonArray()
-            val actionsList = gson.fromJson(actionsArray, Array<AssistantAction>::class.java).toList()
-
-            Pair(speech, actionsList)
+            if (fullText.contains("[ACTIONS:")) {
+                val jsonPart = fullText.substringAfter("[ACTIONS:").substringBeforeLast("]")
+                val wrapped = "[$jsonPart]"
+                gson.fromJson(wrapped, Array<AssistantAction>::class.java).toList()
+            } else {
+                emptyList()
+            }
         } catch (e: Exception) {
-            Log.e("AssistantBrain", "Failed to parse SuperIntelligence output", e)
-            Pair("Acknowledged, Sir.", emptyList())
+            Log.e("AssistantBrain", "Failed to extract actions from stream", e)
+            emptyList()
         }
     }
 
