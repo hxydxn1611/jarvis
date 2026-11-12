@@ -34,9 +34,22 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:background="@drawable/card_background"
-            android:paddingHorizontal="12dp"
+            android:paddingHorizontal="10dp"
             android:paddingVertical="6dp"
-            android:text="● SYSTEM ACTIVE"
+            android:text="● ACTIVE"
+            android:textColor="#00E5FF"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/tv_hands_free_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/card_background"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="6dp"
+            android:text="🎤 WAKE: ON"
             android:textColor="#00E5FF"
             android:textSize="11sp"
             android:fontFamily="monospace" />

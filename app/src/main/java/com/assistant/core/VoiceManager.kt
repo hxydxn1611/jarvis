@@ -8,15 +8,25 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 object VoiceManager : TextToSpeech.OnInitListener {
 
     private const val TAG = "VoiceManager"
     private var tts: TextToSpeech? = null
-    private var isTtsReady = false
+    var isTtsReady = false
+        private set
+
+    @Volatile
+    var isSpeaking = false
+        private set
+
     private var hasStartedSpeakingCurrentTurn = false
+    private val speechCallbacks = ConcurrentHashMap<String, () -> Unit>()
+    private var turnCompletionCallback: (() -> Unit)? = null
 
     fun init(context: Context) {
         if (tts == null) {
@@ -27,6 +37,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             configureBritishMaleVoice()
+            setupUtteranceListener()
             isTtsReady = true
             Log.i(TAG, "Jarvis British Male TTS Engine Initialized.")
         }
@@ -61,10 +72,49 @@ object VoiceManager : TextToSpeech.OnInitListener {
         tts?.setSpeechRate(1.02f)
     }
 
+    private fun setupUtteranceListener() {
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                isSpeaking = true
+            }
+
+            override fun onDone(utteranceId: String?) {
+                if (utteranceId != null) {
+                    val cb = speechCallbacks.remove(utteranceId)
+                    cb?.invoke()
+                }
+
+                // If no more utterances queued
+                if (speechCallbacks.isEmpty() && tts?.isSpeaking != true) {
+                    isSpeaking = false
+                    val finalCb = turnCompletionCallback
+                    turnCompletionCallback = null
+                    finalCb?.invoke()
+                }
+            }
+
+            override fun onError(utteranceId: String?) {
+                if (utteranceId != null) {
+                    speechCallbacks.remove(utteranceId)
+                }
+                isSpeaking = false
+                val finalCb = turnCompletionCallback
+                turnCompletionCallback = null
+                finalCb?.invoke()
+            }
+        })
+    }
+
+    fun isCurrentlySpeaking(): Boolean {
+        return isSpeaking || (tts?.isSpeaking == true)
+    }
+
     // --- Sub-Second Streaming Audio Queue ---
 
     fun resetSpeechTurn() {
         hasStartedSpeakingCurrentTurn = false
+        speechCallbacks.clear()
+        turnCompletionCallback = null
         stopSpeaking()
     }
 
@@ -72,24 +122,41 @@ object VoiceManager : TextToSpeech.OnInitListener {
         if (!isTtsReady || sentence.isBlank()) return
         val clean = sentence.trim()
 
+        val utteranceId = "STREAM_${System.currentTimeMillis()}_${clean.hashCode()}"
         if (!hasStartedSpeakingCurrentTurn) {
             // First chunk: Flush any previous audio and play immediately (<400ms)
-            tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_STREAM_FIRST")
+            tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             hasStartedSpeakingCurrentTurn = true
         } else {
             // Subsequent chunks: Queue seamlessly behind the current sentence
-            tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, "JARVIS_STREAM_QUEUE")
+            tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, utteranceId)
         }
     }
 
-    fun speak(text: String) {
+    fun speak(text: String, onDone: (() -> Unit)? = null) {
         if (isTtsReady && text.isNotBlank()) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_VOICE_UTTERANCE")
+            val utteranceId = "UTTER_${System.currentTimeMillis()}"
+            if (onDone != null) {
+                speechCallbacks[utteranceId] = onDone
+            }
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        } else {
+            onDone?.invoke()
+        }
+    }
+
+    fun onTurnComplete(onDone: (() -> Unit)? = null) {
+        if (onDone == null) return
+        if (isCurrentlySpeaking()) {
+            turnCompletionCallback = onDone
+        } else {
+            onDone()
         }
     }
 
     fun stopSpeaking() {
         tts?.stop()
+        isSpeaking = false
     }
 
     fun listen(context: Context, onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
@@ -107,7 +174,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
 
-            // INSTANT CUTOFF: Stop listening 400ms after user finishes talking (removes 1.5s lag)
+            // INSTANT CUTOFF: Stop listening 450ms after user finishes talking
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
@@ -142,5 +209,6 @@ object VoiceManager : TextToSpeech.OnInitListener {
         tts?.shutdown()
         tts = null
         isTtsReady = false
+        isSpeaking = false
     }
 }

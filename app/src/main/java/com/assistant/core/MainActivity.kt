@@ -14,6 +14,9 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -28,7 +31,9 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,6 +41,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var brain: AssistantBrain
     private val scope = CoroutineScope(Dispatchers.Main)
     private var coreAnimator: ObjectAnimator? = null
+
+    // Ambient Hands-Free Wake Engine
+    private var isHandsFreeEnabled = true
+    private var ambientRecognizer: SpeechRecognizer? = null
+    private var isAmbientListening = false
+    private var isProcessingCommand = false
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.RECORD_AUDIO,
@@ -62,18 +73,62 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+        isHandsFreeEnabled = prefs.getBoolean("hands_free_wake_word", true)
+
         brain = AssistantBrain(this)
         VoiceManager.init(this)
 
         startCoreAnimation()
         setupInteractions()
+        updateHandsFreePill()
         checkPermissionsState()
         requestRuntimePermissionsIfNeeded()
+
+        if (intent?.getBooleanExtra("AUTO_LISTEN", false) == true) {
+            triggerVoiceListening()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent?.getBooleanExtra("AUTO_LISTEN", false) == true) {
+            triggerVoiceListening()
+        }
     }
 
     override fun onResume() {
         super.onResume()
         checkPermissionsState()
+
+        // Stop background wake service when app is active in foreground to prevent mic collisions
+        try {
+            stopService(Intent(this, WakeWordService::class.java))
+        } catch (e: Exception) {}
+
+        if (isHandsFreeEnabled && !isProcessingCommand) {
+            startAmbientWakeWordListener()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopAmbientWakeWordListener()
+
+        // Hand over acoustic sensor to background service when app moves to background
+        if (isHandsFreeEnabled) {
+            try {
+                val wakeIntent = Intent(this, WakeWordService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(this, wakeIntent)
+                } else {
+                    startService(wakeIntent)
+                }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Failed to start background WakeWordService", e)
+            }
+        }
     }
 
     private fun requestRuntimePermissionsIfNeeded() {
@@ -82,6 +137,17 @@ class MainActivity : AppCompatActivity() {
         }
         if (missing.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, missing.toTypedArray(), 102)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 102 || requestCode == 101) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                if (isHandsFreeEnabled && !isProcessingCommand) {
+                    startAmbientWakeWordListener()
+                }
+            }
         }
     }
 
@@ -113,6 +179,11 @@ class MainActivity : AppCompatActivity() {
             triggerVisualScan()
         }
 
+        // Hands-Free Toggle Pill
+        binding.tvHandsFreePill.setOnClickListener {
+            toggleHandsFree()
+        }
+
         // Send Text command via Keyboard
         binding.etCommand.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
@@ -142,11 +213,161 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun toggleHandsFree() {
+        isHandsFreeEnabled = !isHandsFreeEnabled
+        val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("hands_free_wake_word", isHandsFreeEnabled).apply()
+
+        updateHandsFreePill()
+        if (isHandsFreeEnabled) {
+            Toast.makeText(this, "Hands-Free Active: Just say 'Hey Jarvis'", Toast.LENGTH_SHORT).show()
+            startAmbientWakeWordListener()
+        } else {
+            Toast.makeText(this, "Hands-Free Deactivated: Tap Core to speak", Toast.LENGTH_SHORT).show()
+            stopAmbientWakeWordListener()
+            binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+        }
+    }
+
+    private fun updateHandsFreePill() {
+        if (isHandsFreeEnabled) {
+            binding.tvHandsFreePill.text = "🎤 WAKE: ON"
+            binding.tvHandsFreePill.setTextColor(0xFF00E5FF.toInt())
+        } else {
+            binding.tvHandsFreePill.text = "🎤 WAKE: OFF"
+            binding.tvHandsFreePill.setTextColor(0xFF888888.toInt())
+        }
+    }
+
+    // --- Foreground Hands-Free Ambient Listening ---
+
+    private fun startAmbientWakeWordListener() {
+        if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking()) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+
+        runOnUiThread {
+            if (!isProcessingCommand) {
+                binding.tvCoreState.text = "HANDS-FREE ACTIVE // SAY 'HEY JARVIS'"
+                setCoreActive(false)
+            }
+        }
+
+        try {
+            ambientRecognizer?.destroy()
+            ambientRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        isAmbientListening = true
+                    }
+
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {}
+
+                    override fun onError(error: Int) {
+                        isAmbientListening = false
+                        if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
+                            scope.launch {
+                                delay(400)
+                                if (isHandsFreeEnabled && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
+                                    restartAmbientListener()
+                                }
+                            }
+                        }
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        isAmbientListening = false
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val spoken = matches?.firstOrNull()?.lowercase() ?: ""
+                        if (spoken.isNotBlank()) {
+                            handleAmbientSpeech(spoken)
+                        } else if (isHandsFreeEnabled && !isProcessingCommand) {
+                            restartAmbientListener()
+                        }
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val partialMatches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val partial = partialMatches?.firstOrNull()?.lowercase() ?: ""
+                        if (partial.contains("jarvis") || partial.contains("hey jarvis")) {
+                            ambientRecognizer?.stopListening()
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            }
+            restartAmbientListener()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Ambient recognizer init error", e)
+        }
+    }
+
+    private fun restartAmbientListener() {
+        if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking()) return
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.UK.toString())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+            ambientRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to start ambient recognizer", e)
+        }
+    }
+
+    private fun stopAmbientWakeWordListener() {
+        isAmbientListening = false
+        try {
+            ambientRecognizer?.stopListening()
+            ambientRecognizer?.destroy()
+            ambientRecognizer = null
+        } catch (e: Exception) {}
+    }
+
+    private fun handleAmbientSpeech(spoken: String) {
+        if (spoken.contains("jarvis")) {
+            val trailingCommand = spoken.substringAfter("jarvis").trim().removePrefix(",").trim()
+            stopAmbientWakeWordListener()
+
+            if (trailingCommand.isNotBlank()) {
+                // User said complete command directly: "Hey Jarvis what is the chemical equation of water"
+                handleUserInput(trailingCommand)
+            } else {
+                // User just said "Hey Jarvis" or "Jarvis"
+                setCoreActive(true)
+                binding.tvCoreState.text = "LISTENING SIR..."
+                binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir."
+
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
+
+                VoiceManager.speak("At your service, Sir.") {
+                    runOnUiThread {
+                        triggerVoiceListening()
+                    }
+                }
+            }
+        } else {
+            // Did not match "jarvis"
+            restartAmbientListener()
+        }
+    }
+
     private fun triggerVoiceListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 101)
             return
         }
+
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
 
         val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -165,8 +386,12 @@ class MainActivity : AppCompatActivity() {
             },
             onError = { _ ->
                 setCoreActive(false)
-                binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+                isProcessingCommand = false
+                binding.tvCoreState.text = if (isHandsFreeEnabled) "HANDS-FREE ACTIVE // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
                 binding.tvTranscript.text = "Jarvis: Standing by, Sir."
+                if (isHandsFreeEnabled) {
+                    startAmbientWakeWordListener()
+                }
             }
         )
     }
@@ -180,6 +405,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleVisualScan(bitmap: Bitmap) {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+
         val prompt = binding.etCommand.text?.toString()?.trim() ?: ""
         binding.etCommand.text?.clear()
         binding.tvTranscript.text = "You: [Visual Scan Dispatched]\n\nJarvis: "
@@ -202,16 +430,30 @@ class MainActivity : AppCompatActivity() {
 
             runOnUiThread {
                 binding.tvTranscript.text = "You: [Visual Scan]\n\nJarvis: $finalSpeech"
-                binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+                binding.tvCoreState.text = "SPEAKING..."
             }
 
             if (actions.isNotEmpty()) {
                 AssistantAccessibilityService.instance?.executeActions(actions)
             }
+
+            VoiceManager.onTurnComplete {
+                runOnUiThread {
+                    isProcessingCommand = false
+                    setCoreActive(false)
+                    binding.tvCoreState.text = if (isHandsFreeEnabled) "HANDS-FREE ACTIVE // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                    if (isHandsFreeEnabled) {
+                        startAmbientWakeWordListener()
+                    }
+                }
+            }
         }
     }
 
     private fun handleUserInput(input: String) {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+
         binding.tvTranscript.text = "You: $input\n\nJarvis: "
         binding.tvCoreState.text = "THINKING..."
         VoiceManager.resetSpeechTurn()
@@ -233,13 +475,24 @@ class MainActivity : AppCompatActivity() {
 
             runOnUiThread {
                 binding.tvTranscript.text = "You: $input\n\nJarvis: $finalSpeech"
-                binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+                binding.tvCoreState.text = "SPEAKING..."
                 SoundEffectManager.playConfirmChirp()
             }
 
             // Execute device actions
             if (actions.isNotEmpty()) {
                 AssistantAccessibilityService.instance?.executeActions(actions)
+            }
+
+            VoiceManager.onTurnComplete {
+                runOnUiThread {
+                    isProcessingCommand = false
+                    setCoreActive(false)
+                    binding.tvCoreState.text = if (isHandsFreeEnabled) "HANDS-FREE ACTIVE // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                    if (isHandsFreeEnabled) {
+                        startAmbientWakeWordListener()
+                    }
+                }
             }
         }
     }
@@ -301,17 +554,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnWakeWord.setOnClickListener {
-            try {
-                if (WakeWordService.isListening) {
-                    stopService(Intent(this, WakeWordService::class.java))
-                    Toast.makeText(this, "Wake Array Disarmed", Toast.LENGTH_SHORT).show()
-                } else {
-                    startService(Intent(this, WakeWordService::class.java))
-                    Toast.makeText(this, "Hands-Free Wake Array Active ('Hey Jarvis')", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(this, "Wake Array initialization restricted by OS", Toast.LENGTH_SHORT).show()
-            }
+            toggleHandsFree()
+            dialog.dismiss()
         }
 
         btnSentry.setOnClickListener {
@@ -349,6 +593,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopAmbientWakeWordListener()
         coreAnimator?.cancel()
         VoiceManager.shutdown()
     }
