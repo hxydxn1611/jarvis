@@ -2,11 +2,13 @@ package com.assistant.core
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import android.util.Log
 import java.util.Locale
 
@@ -24,25 +26,55 @@ object VoiceManager : TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            // British English Persona
-            val result = tts?.setLanguage(Locale.UK)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts?.setLanguage(Locale.ENGLISH)
-            }
-            tts?.setPitch(0.92f)
-            tts?.setSpeechRate(1.03f)
+            configureBritishMaleVoice()
             isTtsReady = true
-            Log.i(TAG, "British Persona TTS Engine Initialized.")
+            Log.i(TAG, "Jarvis British Male TTS Engine Initialized.")
         }
     }
 
-    fun speak(text: String) {
+    private fun configureBritishMaleVoice() {
+        val ukLocale = Locale.UK
+        tts?.language = ukLocale
+
+        // Look for British Male voice in installed system voice list
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val voices = tts?.voices
+            if (!voices.isNullOrEmpty()) {
+                val maleUkVoice = voices.firstOrNull { voice ->
+                    val isUk = voice.locale.country.equals("GB", ignoreCase = true) || voice.locale.language.equals("en", ignoreCase = true)
+                    val isMale = voice.name.contains("male", ignoreCase = true) ||
+                                 voice.name.contains("en-gb-x-rjs#male", ignoreCase = true) ||
+                                 voice.name.contains("en-gb-x-gba", ignoreCase = true)
+                    isUk && isMale
+                } ?: voices.firstOrNull { voice ->
+                    voice.locale.country.equals("GB", ignoreCase = true) && !voice.name.contains("female", ignoreCase = true)
+                }
+
+                if (maleUkVoice != null) {
+                    tts?.voice = maleUkVoice
+                }
+            }
+        }
+
+        // Set authentic British male baritone pitch & smooth speech rate
+        tts?.setPitch(0.84f)
+        tts?.setSpeechRate(1.02f)
+    }
+
+    fun speak(text: String, onComplete: (() -> Unit)? = null) {
         if (isTtsReady && text.isNotBlank()) {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_VOICE_UTTERANCE")
         }
     }
 
+    fun stopSpeaking() {
+        tts?.stop()
+    }
+
     fun listen(context: Context, onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
+        // Stop any active speech before listening to prevent microphone feedback collision
+        stopSpeaking()
+
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onError?.invoke("Speech recognition unavailable.")
             return

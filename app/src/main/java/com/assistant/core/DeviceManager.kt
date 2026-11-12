@@ -2,12 +2,14 @@ package com.assistant.core
 
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
 import android.hardware.camera2.CameraManager
 import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.provider.AlarmClock
+import android.provider.ContactsContract
 import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -19,21 +21,66 @@ class DeviceManager(private val context: Context) {
         private const val TAG = "DeviceManager"
     }
 
-    // --- Phone Calls ---
-    fun makeCall(phoneNumber: String) {
+    // --- Phone Calls with Smart Contact Name Resolution ---
+    fun makeCall(contactNameOrNumber: String) {
         try {
-            val cleanNumber = phoneNumber.replace(Regex("[^0-9+]"), "")
-            val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$cleanNumber")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // First: Check if it's already a numeric phone number
+            var resolvedNumber = contactNameOrNumber.replace(Regex("[^0-9+]"), "")
+
+            // Second: If not numeric or too short, search phone's Contacts book
+            if (resolvedNumber.length < 5) {
+                val found = lookupContactNumber(contactNameOrNumber)
+                if (found != null) {
+                    resolvedNumber = found
+                }
             }
-            context.startActivity(intent)
+
+            if (resolvedNumber.isNotBlank()) {
+                val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$resolvedNumber")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } else {
+                // If contact not found, open dialer with original query
+                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$contactNameOrNumber")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(dialIntent)
+            }
         } catch (e: Exception) {
-            // Fallback to dialer if CALL_PHONE permission was not granted by user
-            val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneNumber")).apply {
+            val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$contactNameOrNumber")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(dialIntent)
         }
+    }
+
+    // Resolves contact name (e.g. "Rahul", "Mom") to actual phone number
+    private fun lookupContactNumber(name: String): String? {
+        var number: String? = null
+        val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
+        )
+        val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+        val selectionArgs = arrayOf("%$name%")
+
+        var cursor: Cursor? = null
+        try {
+            cursor = context.contentResolver.query(uri, projection, selection, selectionArgs, null)
+            if (cursor != null && cursor.moveToFirst()) {
+                val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                if (numberIndex != -1) {
+                    number = cursor.getString(numberIndex)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Contact lookup failed", e)
+        } finally {
+            cursor?.close()
+        }
+        return number
     }
 
     // --- Email Composition ---
@@ -76,7 +123,6 @@ class DeviceManager(private val context: Context) {
             }
             context.startActivity(intent)
         } catch (e: Exception) {
-            // Fallback to YouTube
             val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -105,7 +151,7 @@ class DeviceManager(private val context: Context) {
             if (location != null) {
                 "Lat: ${"%.4f".format(location.latitude)}, Lon: ${"%.4f".format(location.longitude)}"
             } else {
-                "GPS Active (Awaiting Fix)"
+                "GPS Active"
             }
         } catch (e: Exception) {
             "Location permissions pending"

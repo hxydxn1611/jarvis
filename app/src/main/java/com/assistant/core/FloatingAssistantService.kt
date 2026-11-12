@@ -6,6 +6,8 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -93,13 +95,14 @@ class FloatingAssistantService : Service() {
 
         try {
             windowManager?.addView(floatingView, params)
-        } catch (e: Exception) {
-            // Already added or permission revoked
-        }
+        } catch (e: Exception) {}
     }
 
     private fun onBubbleClicked() {
-        VoiceManager.speak("Listening, Sir.")
+        // Haptic feedback instead of voice interruption
+        triggerHapticFeedback()
+
+        // Listen immediately in clean silence
         VoiceManager.listen(
             context = this,
             onResult = { spokenText ->
@@ -114,9 +117,19 @@ class FloatingAssistantService : Service() {
                 }
             },
             onError = { _ ->
-                VoiceManager.speak("Standing by.")
+                // Silent reset
             }
         )
+    }
+
+    private fun triggerHapticFeedback() {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(40)
+        }
     }
 
     override fun onDestroy() {

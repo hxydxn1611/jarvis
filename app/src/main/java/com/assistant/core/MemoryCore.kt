@@ -34,3 +34,4 @@ object MemoryCore {
         return memories.entries.joinToString("; ") { "${it.key}: ${it.value}" }
     }
 }
+

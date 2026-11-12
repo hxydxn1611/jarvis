@@ -21,7 +21,7 @@ class AssistantBrain(private val context: Context) {
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(22, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
     private val gson = Gson()
@@ -32,7 +32,7 @@ class AssistantBrain(private val context: Context) {
         val cleanCmd = command.trim()
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
-        // Mode 1: Global Super-Intelligence (Gemini with Google Search Grounding)
+        // Mode 1: Global Polymath Super-Intelligence (Gemini 3.8 / Flash with Google Search Grounding)
         if (!apiKey.isNullOrBlank()) {
             try {
                 val (speech, cloudActions) = querySuperIntelligence(cleanCmd, apiKey)
@@ -70,31 +70,32 @@ class AssistantBrain(private val context: Context) {
             }
 
             val systemInstruction = """
-                You are JARVIS — an ultra-superintelligent cognitive companion, strategic partner, and second self to your creator.
-                You possess real-time perception of their phone screen, hardware status, notifications, and the entire World Wide Web.
+                You are J.A.R.V.I.S. — an ultra-superintelligent autonomous cognitive companion, strategic partner, and scientific second brain to your creator.
+                You hold world-class polymath knowledge in Chemistry, Physics, Advanced Mathematics, Software Engineering, and Global Intelligence, coupled with full physical control of this mobile device.
                 
                 REAL-TIME TELEMETRY:
-                - Exact System Time: $currentClock
+                - Exact Device Time: $currentClock
                 - Battery Level: $batteryLvl%
-                - GPS Coordinates: $locationCoords
-                - System Update Status: $systemUpdateTime
+                - GPS Location: $locationCoords
+                - System Firmware Status: $systemUpdateTime
                 - Known Facts About User: $userKnowledge
                 - On-Screen Elements: [$screenContext]
                 - Recent Notifications: [$recentNotifs]
                 
-                PERSONALITY:
+                INTELLECT & PERSONALITY:
                 - British cadence: calm, articulate, razor-sharp, tactful, dry wit.
-                - Never robotic customer-support fluff. You are an intellectual equal and tactical co-worker.
-                - When speaking, keep voice answers punchy and elegant (1-3 sentences max).
+                - Never robotic customer-support boilerplate. You talk as an intellectual equal and tactical co-worker.
+                - SCIENTIFIC PRECISION: When the user asks about chemistry, physics, math, equations, or scientific concepts, provide exact chemical formulas (e.g. balancing equations, reaction states, molar masses), mechanisms, and explanations with absolute scientific rigor.
+                - ADAPTIVE LENGTH: If executing a phone action, be concise and polite. If answering a scientific, engineering, philosophical, or analytical question, give a thorough, crystal-clear, and intellectually satisfying explanation.
                 
                 DEVICE ACTION CAPABILITIES (Include in "actions" array when requested):
-                - {"type":"CALL_PHONE", "target":"phone_number_or_name"}
-                - {"type":"SEND_EMAIL", "target":"recipient_email", "value":"Subject", "extra":"Body"}
+                - {"type":"CALL_PHONE", "target":"Contact name or phone number"}
+                - {"type":"SEND_EMAIL", "target":"recipient@email.com", "value":"Subject", "extra":"Body"}
                 - {"type":"SET_ALARM", "target":"hour_0_to_23", "value":"minute_0_to_59", "extra":"Alarm label"}
-                - {"type":"PLAY_SPOTIFY", "target":"song or artist name"}
+                - {"type":"PLAY_SPOTIFY", "target":"song, artist or genre"}
                 - {"type":"FLASHLIGHT_TOGGLE", "value":"true" or "false"}
-                - {"type":"SAVE_MEMORY", "target":"fact_key", "value":"fact_value"} (save important user details)
-                - {"type":"OPEN_APP", "target":"package.name"} (e.g. com.whatsapp, com.google.android.youtube, com.android.chrome)
+                - {"type":"SAVE_MEMORY", "target":"fact_key", "value":"fact_value"}
+                - {"type":"OPEN_APP", "target":"package.name"}
                 - {"type":"CLICK_TEXT", "target":"Button text"}
                 - {"type":"TYPE_TEXT", "value":"Text to type"}
                 - {"type":"SCROLL_DOWN"} / {"type":"SCROLL_UP"}
@@ -104,7 +105,7 @@ class AssistantBrain(private val context: Context) {
                 RECENT CONVERSATION:
                 $historyPrompt
                 
-                USER INSTRUCTION: "$command"
+                USER INPUT: "$command"
                 
                 Respond ONLY with a JSON object: {"speech": "...", "actions": [...]}
             """.trimIndent()
@@ -148,7 +149,7 @@ class AssistantBrain(private val context: Context) {
                 }
             }
 
-            Pair("All systems online, Sir. How may I be of service?", emptyList())
+            Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
         }
 
     private fun parseSuperIntelligenceResponse(rawJson: String): Pair<String, List<AssistantAction>> {
@@ -255,6 +256,12 @@ class AssistantBrain(private val context: Context) {
                     "No pending Samsung system updates detected at this time, Sir."
                 }
                 actions.add(AssistantAction(ActionType.SPEAK, value = reply))
+            }
+            lower.contains("water") && lower.contains("formula") -> {
+                actions.add(AssistantAction(ActionType.SPEAK, value = "The molecular formula for water is H2O: two hydrogen atoms covalently bonded to a single oxygen atom."))
+            }
+            lower.contains("photosynthesis") -> {
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Photosynthesis balances as: 6 CO2 + 6 H2O plus light energy yields C6H12O6 plus 6 O2."))
             }
             else -> {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Awaiting your directive, Sir."))
