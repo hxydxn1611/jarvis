@@ -476,11 +476,11 @@ class MainActivity : AppCompatActivity() {
                             existing.addAll(matches.map { it.lowercase().trim() })
                             prefs.edit().putStringSet("custom_wake_signatures", existing).apply()
 
-                            KnowledgeGraph.addNode(
+                            KnowledgeGraph.saveNode(
                                 this@MainActivity,
+                                "PREFERENCE",
                                 "VOICE_SIGNATURE",
-                                "User calibrated acoustic phrases: ${matches.joinToString()}",
-                                NodeCategory.PREFERENCE
+                                "User calibrated acoustic phrases: ${matches.joinToString()}"
                             )
 
                             SoundEffectManager.playConfirmChirp()
