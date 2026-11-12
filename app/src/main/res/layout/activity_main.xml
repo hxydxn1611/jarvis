@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#070A14"
-    android:padding="20dp">
+    android:padding="16dp">
 
     <!-- Top Status Bar -->
     <LinearLayout
@@ -58,7 +58,7 @@
             android:id="@+id/btn_settings"
             android:layout_width="40dp"
             android:layout_height="40dp"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_manage"
             android:tint="#81D4FA" />
@@ -69,7 +69,7 @@
         android:id="@+id/card_permission_alert"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="8dp"
         app:cardBackgroundColor="#1A00E5FF"
         app:strokeColor="#00E5FF"
         app:strokeWidth="1dp"
@@ -107,10 +107,10 @@
     <!-- Center Living AI Core (Neural Orb) -->
     <FrameLayout
         android:id="@+id/core_container"
-        android:layout_width="260dp"
-        android:layout_height="260dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/dialogue_container"
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        app:layout_constraintTop_toBottomOf="@id/card_permission_alert"
+        app:layout_constraintBottom_toTopOf="@id/tv_core_state"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -123,16 +123,16 @@
 
         <!-- Inner Arc Ring -->
         <View
-            android:layout_width="150dp"
-            android:layout_height="150dp"
+            android:layout_width="140dp"
+            android:layout_height="140dp"
             android:layout_gravity="center"
             android:background="@drawable/floating_orb" />
 
         <!-- Center Energy Core -->
         <View
             android:id="@+id/view_core_pulse"
-            android:layout_width="70dp"
-            android:layout_height="70dp"
+            android:layout_width="65dp"
+            android:layout_height="65dp"
             android:layout_gravity="center"
             android:background="@drawable/arc_reactor_bubble" />
 
@@ -157,8 +157,9 @@
         android:textSize="12sp"
         android:fontFamily="monospace"
         android:letterSpacing="0.1"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="8dp"
         app:layout_constraintTop_toBottomOf="@id/core_container"
+        app:layout_constraintBottom_toTopOf="@id/scroll_protocols"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -168,8 +169,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:scrollbars="none"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
+        android:layout_marginVertical="8dp"
         app:layout_constraintTop_toBottomOf="@id/tv_core_state"
         app:layout_constraintBottom_toTopOf="@id/dialogue_container">
 
@@ -250,10 +250,11 @@
     <ScrollView
         android:id="@+id/dialogue_container"
         android:layout_width="match_parent"
-        android:layout_height="130dp"
-        android:layout_marginBottom="16dp"
+        android:layout_height="120dp"
+        android:layout_marginBottom="12dp"
         android:background="@drawable/card_background"
         android:padding="14dp"
+        app:layout_constraintTop_toBottomOf="@id/scroll_protocols"
         app:layout_constraintBottom_toTopOf="@id/bottom_input_bar">
 
         <TextView

@@ -72,8 +72,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Log.e("JarvisCrash", "Uncaught exception in ${thread.name}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
         }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -266,7 +268,7 @@ class MainActivity : AppCompatActivity() {
     // --- Foreground Hands-Free Ambient Listening Array ---
 
     private fun startAmbientWakeWordListener() {
-        if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking()) return
+        if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking() || isFinishing || isDestroyed) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
 
         runOnUiThread {
@@ -274,100 +276,107 @@ class MainActivity : AppCompatActivity() {
                 binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
                 setCoreActive(false)
             }
-        }
 
-        try {
-            ambientRecognizer?.cancel()
-            ambientRecognizer?.destroy()
-            ambientRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-                setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        isAmbientListening = true
-                    }
-
-                    override fun onBeginningOfSpeech() {}
-
-                    override fun onRmsChanged(rmsdB: Float) {
-                        // Live Arc Reactor sound reactivity: dynamically pulses cyan glow with user voice amplitude
-                        if (rmsdB > 2.0f && !VoiceManager.isCurrentlySpeaking()) {
-                            val boost = 1.0f + (rmsdB.coerceIn(0f, 10f) / 10f) * 0.22f
-                            binding.viewCoreGlow.scaleX = boost
-                            binding.viewCoreGlow.scaleY = boost
+            try {
+                ambientRecognizer?.cancel()
+                ambientRecognizer?.destroy()
+                ambientRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                    setRecognitionListener(object : RecognitionListener {
+                        override fun onReadyForSpeech(params: Bundle?) {
+                            isAmbientListening = true
                         }
-                    }
 
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {}
+                        override fun onBeginningOfSpeech() {}
 
-                    override fun onError(error: Int) {
-                        isAmbientListening = false
-                        // On Android, must cancel before restarting, or recreate
-                        if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
-                            scope.launch {
-                                delay(650)
-                                if (isHandsFreeEnabled && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
+                        override fun onRmsChanged(rmsdB: Float) {
+                            if (rmsdB > 2.0f && !VoiceManager.isCurrentlySpeaking()) {
+                                val boost = 1.0f + (rmsdB.coerceIn(0f, 10f) / 10f) * 0.22f
+                                runOnUiThread {
+                                    try {
+                                        binding.viewCoreGlow.scaleX = boost
+                                        binding.viewCoreGlow.scaleY = boost
+                                    } catch (e: Exception) {}
+                                }
+                            }
+                        }
+
+                        override fun onBufferReceived(buffer: ByteArray?) {}
+                        override fun onEndOfSpeech() {}
+
+                        override fun onError(error: Int) {
+                            isAmbientListening = false
+                            if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
+                                scope.launch {
+                                    delay(650)
+                                    if (isHandsFreeEnabled && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
+                                        restartAmbientListener()
+                                    }
+                                }
+                            }
+                        }
+
+                        override fun onResults(results: Bundle?) {
+                            isAmbientListening = false
+                            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
+                            if (matches.isNotEmpty()) {
+                                handleAmbientSpeechMatches(matches)
+                            } else if (isHandsFreeEnabled && !isProcessingCommand) {
+                                scope.launch {
+                                    delay(500)
                                     restartAmbientListener()
                                 }
                             }
                         }
-                    }
 
-                    override fun onResults(results: Bundle?) {
-                        isAmbientListening = false
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
-                        if (matches.isNotEmpty()) {
-                            handleAmbientSpeechMatches(matches)
-                        } else if (isHandsFreeEnabled && !isProcessingCommand) {
-                            scope.launch {
-                                delay(500)
-                                restartAmbientListener()
-                            }
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {}
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
+                        override fun onPartialResults(partialResults: Bundle?) {}
+                        override fun onEvent(eventType: Int, params: Bundle?) {}
+                    })
+                }
+                launchAmbientListeningIntent()
+            } catch (e: Exception) {
+                Log.e(TAG, "Ambient recognizer init error", e)
             }
-            launchAmbientListeningIntent()
-        } catch (e: Exception) {
-            Log.e(TAG, "Ambient recognizer init error", e)
         }
     }
 
     private fun restartAmbientListener() {
         if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking() || isFinishing || isDestroyed) return
-        try {
-            ambientRecognizer?.cancel()
-            launchAmbientListeningIntent()
-        } catch (e: Exception) {
-            startAmbientWakeWordListener()
+        runOnUiThread {
+            try {
+                ambientRecognizer?.cancel()
+                launchAmbientListeningIntent()
+            } catch (e: Exception) {
+                startAmbientWakeWordListener()
+            }
         }
     }
 
     private fun launchAmbientListeningIntent() {
-        try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                // Use device's native locale for 100% natural accent recognition
-                val tag = Locale.getDefault().toLanguageTag()
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // Inspect top 5 phonetic candidates
+        runOnUiThread {
+            try {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    val tag = Locale.getDefault().toLanguageTag()
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                }
+                ambientRecognizer?.startListening(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start listening", e)
             }
-            ambientRecognizer?.startListening(intent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start listening", e)
         }
     }
 
     private fun stopAmbientWakeWordListener() {
         isAmbientListening = false
-        try {
-            ambientRecognizer?.cancel()
-            ambientRecognizer?.destroy()
-            ambientRecognizer = null
-        } catch (e: Exception) {}
+        runOnUiThread {
+            try {
+                ambientRecognizer?.cancel()
+                ambientRecognizer?.destroy()
+                ambientRecognizer = null
+            } catch (e: Exception) {}
+        }
     }
 
     private fun handleAmbientSpeechMatches(matches: List<String>) {
@@ -448,62 +457,72 @@ class MainActivity : AppCompatActivity() {
         VoiceManager.speak("Initiating acoustic calibration, Sir. Please say 'Hey Jarvis' clearly now.") {
             runOnUiThread {
                 binding.tvTranscript.text = "Listening for your voice signature...\nSay 'Hey Jarvis' now."
-                val calibrator = SpeechRecognizer.createSpeechRecognizer(this)
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-                }
-                calibrator.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {}
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {}
-                    override fun onError(error: Int) {
-                        isProcessingCommand = false
-                        calibrator.destroy()
-                        binding.tvTranscript.text = "Jarvis: Calibration timed out, Sir. Tap 'Train Voice' to try again."
-                        binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
-                        startAmbientWakeWordListener()
+                try {
+                    val calibrator = SpeechRecognizer.createSpeechRecognizer(this)
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     }
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
-                        calibrator.destroy()
-                        if (matches.isNotEmpty()) {
-                            val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-                            val existing = prefs.getStringSet("custom_wake_signatures", emptySet())?.toMutableSet() ?: mutableSetOf()
-                            existing.addAll(matches.map { it.lowercase().trim() })
-                            prefs.edit().putStringSet("custom_wake_signatures", existing).apply()
+                    calibrator.setRecognitionListener(object : RecognitionListener {
+                        override fun onReadyForSpeech(params: Bundle?) {}
+                        override fun onBeginningOfSpeech() {}
+                        override fun onRmsChanged(rmsdB: Float) {}
+                        override fun onBufferReceived(buffer: ByteArray?) {}
+                        override fun onEndOfSpeech() {}
+                        override fun onError(error: Int) {
+                            runOnUiThread {
+                                isProcessingCommand = false
+                                calibrator.destroy()
+                                binding.tvTranscript.text = "Jarvis: Calibration timed out, Sir. Tap 'Train Voice' to try again."
+                                binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
+                                startAmbientWakeWordListener()
+                            }
+                        }
+                        override fun onResults(results: Bundle?) {
+                            runOnUiThread {
+                                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
+                                calibrator.destroy()
+                                if (matches.isNotEmpty()) {
+                                    val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+                                    val existing = prefs.getStringSet("custom_wake_signatures", emptySet())?.toMutableSet() ?: mutableSetOf()
+                                    existing.addAll(matches.map { it.lowercase().trim() })
+                                    prefs.edit().putStringSet("custom_wake_signatures", existing).apply()
 
-                            KnowledgeGraph.saveNode(
-                                this@MainActivity,
-                                "PREFERENCE",
-                                "VOICE_SIGNATURE",
-                                "User calibrated acoustic phrases: ${matches.joinToString()}"
-                            )
+                                    KnowledgeGraph.saveNode(
+                                        this@MainActivity,
+                                        "PREFERENCE",
+                                        "VOICE_SIGNATURE",
+                                        "User calibrated acoustic phrases: ${matches.joinToString()}"
+                                    )
 
-                            SoundEffectManager.playConfirmChirp()
-                            binding.tvTranscript.text = "Jarvis: Voice profile locked and calibrated, Sir!\nRegistered signatures: ${matches.take(3).joinToString()}"
-                            binding.tvCoreState.text = "VOICE CALIBRATED // READY"
-                            Toast.makeText(this@MainActivity, "Voice Calibrated Successfully!", Toast.LENGTH_SHORT).show()
+                                    SoundEffectManager.playConfirmChirp()
+                                    binding.tvTranscript.text = "Jarvis: Voice profile locked and calibrated, Sir!\nRegistered signatures: ${matches.take(3).joinToString()}"
+                                    binding.tvCoreState.text = "VOICE CALIBRATED // READY"
+                                    Toast.makeText(this@MainActivity, "Voice Calibrated Successfully!", Toast.LENGTH_SHORT).show()
 
-                            VoiceManager.speak("Voice signature locked and synchronized, Sir. I am calibrated to your voice.") {
-                                runOnUiThread {
+                                    VoiceManager.speak("Voice signature locked and synchronized, Sir. I am calibrated to your voice.") {
+                                        runOnUiThread {
+                                            isProcessingCommand = false
+                                            setCoreActive(false)
+                                            startAmbientWakeWordListener()
+                                        }
+                                    }
+                                } else {
                                     isProcessingCommand = false
-                                    setCoreActive(false)
                                     startAmbientWakeWordListener()
                                 }
                             }
-                        } else {
-                            isProcessingCommand = false
-                            startAmbientWakeWordListener()
                         }
-                    }
-                    override fun onPartialResults(partialResults: Bundle?) {}
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-                calibrator.startListening(intent)
+                        override fun onPartialResults(partialResults: Bundle?) {}
+                        override fun onEvent(eventType: Int, params: Bundle?) {}
+                    })
+                    calibrator.startListening(intent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Calibration start failed", e)
+                    isProcessingCommand = false
+                    startAmbientWakeWordListener()
+                }
             }
         }
     }
@@ -632,37 +651,39 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        stopAmbientWakeWordListener()
-        isProcessingCommand = true
+        runOnUiThread {
+            stopAmbientWakeWordListener()
+            isProcessingCommand = true
 
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
-        }
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
 
-        setCoreActive(true)
-        binding.tvCoreState.text = "LISTENING..."
-        binding.tvTranscript.text = "Listening to you, Sir..."
+            setCoreActive(true)
+            binding.tvCoreState.text = "LISTENING..."
+            binding.tvTranscript.text = "Listening to you, Sir..."
 
-        VoiceManager.listen(
-            context = this,
-            onResult = { spokenText ->
-                setCoreActive(false)
-                handleUserInput(spokenText)
-            },
-            onError = { _ ->
-                setCoreActive(false)
-                isProcessingCommand = false
-                binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
-                binding.tvTranscript.text = "Jarvis: Standing by, Sir."
-                if (isHandsFreeEnabled) {
-                    scope.launch {
-                        delay(600)
-                        startAmbientWakeWordListener()
+            VoiceManager.listen(
+                context = this,
+                onResult = { spokenText ->
+                    setCoreActive(false)
+                    handleUserInput(spokenText)
+                },
+                onError = { _ ->
+                    setCoreActive(false)
+                    isProcessingCommand = false
+                    binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                    binding.tvTranscript.text = "Jarvis: Standing by, Sir."
+                    if (isHandsFreeEnabled) {
+                        scope.launch {
+                            delay(600)
+                            startAmbientWakeWordListener()
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
     }
 
     private fun triggerVisualScan() {
@@ -846,8 +867,12 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             } else {
-                startService(Intent(this, FloatingAssistantService::class.java))
-                Toast.makeText(this, "Floating Orb Activated!", Toast.LENGTH_SHORT).show()
+                try {
+                    startService(Intent(this, FloatingAssistantService::class.java))
+                    Toast.makeText(this, "Floating Orb Activated!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Floating orb start error", e)
+                }
             }
         }
 
@@ -878,7 +903,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 startService(Intent(this, FloatingAssistantService::class.java))
             } catch (e: Exception) {
-                Log.e(TAG, "Floating orb start error", e)
+                Log.w(TAG, "Floating orb start error", e)
             }
         }
 
