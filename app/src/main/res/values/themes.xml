@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Assistant" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:statusBarColor">@color/ui_bg_dark</item>
+        <item name="android:navigationBarColor">@color/ui_bg_dark</item>
+        <item name="colorPrimary">@color/ui_cyan</item>
+        <item name="colorSecondary">@color/ui_blue</item>
+        <item name="android:windowBackground">@color/ui_bg_dark</item>
+    </style>
+</resources>

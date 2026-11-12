@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ui_bg_dark"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginBottom="24dp">
+
+            <View
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/arc_reactor_bubble" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="JARVIS"
+                    android:textColor="@color/ui_cyan"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1" />
+
+                <TextView
+                    android:id="@+id/tv_system_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="INTELLIGENCE CORE // ONLINE"
+                    android:textColor="@color/ui_text_secondary"
+                    android:textSize="12sp"
+                    android:letterSpacing="0.05" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Permissions Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SYSTEM PERMISSIONS"
+                android:textColor="@color/ui_cyan"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <!-- Accessibility Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_accessibility"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="1. Enable Accessibility (Screen Actions)"
+                android:textAlignment="textStart"
+                app:backgroundTint="@color/ui_card_bg"
+                app:strokeColor="@color/ui_cyan"
+                app:strokeWidth="1dp"
+                android:textColor="@color/ui_text_primary"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Overlay Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_overlay"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="2. Enable Floating Quick Controller"
+                android:textAlignment="textStart"
+                app:backgroundTint="@color/ui_card_bg"
+                app:strokeColor="@color/ui_cyan"
+                app:strokeWidth="1dp"
+                android:textColor="@color/ui_text_primary"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Notifications Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_notifications"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="3. Grant Notification Access"
+                android:textAlignment="textStart"
+                app:backgroundTint="@color/ui_card_bg"
+                app:strokeColor="@color/ui_cyan"
+                app:strokeWidth="1dp"
+                android:textColor="@color/ui_text_primary"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Microphone Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_mic"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="4. Grant Microphone Access"
+                android:textAlignment="textStart"
+                app:backgroundTint="@color/ui_card_bg"
+                app:strokeColor="@color/ui_cyan"
+                app:strokeWidth="1dp"
+                android:textColor="@color/ui_text_primary" />
+        </LinearLayout>
+
+        <!-- AI Engine Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="AI REASONING CORE"
+                android:textColor="@color/ui_cyan"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Without an API key, the built-in offline engine processes basic commands (open apps, toggles, gestures). Add a free Gemini key for full conversational understanding."
+                android:textColor="@color/ui_text_secondary"
+                android:textSize="12sp"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:boxStrokeColor="@color/ui_cyan"
+                app:hintTextColor="@color/ui_cyan"
+                android:textColorHint="@color/ui_text_secondary">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_api_key"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Gemini API Key (Optional)"
+                    android:inputType="textPassword"
+                    android:textColor="@color/ui_text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_save_key"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Save Key"
+                android:layout_marginTop="8dp"
+                app:backgroundTint="@color/ui_cyan"
+                android:textColor="@color/black"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Command Console Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="COMMAND CONSOLE"
+                android:textColor="@color/ui_cyan"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:boxStrokeColor="@color/ui_cyan"
+                app:hintTextColor="@color/ui_cyan"
+                android:textColorHint="@color/ui_text_secondary">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/et_manual_command"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="e.g. Open WhatsApp, Scroll down, Flashlight on"
+                    android:textColor="@color/ui_text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_execute"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:text="Execute"
+                    app:backgroundTint="@color/ui_cyan"
+                    android:textColor="@color/black"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_voice_test"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:text="Speak"
+                    app:backgroundTint="@color/ui_blue"
+                    android:textColor="@color/white"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Live Feed Log -->
+        <TextView
+            android:id="@+id/tv_console_log"
+            android:layout_width="match_parent"
+            android:layout_height="140dp"
+            android:background="#050810"
+            android:padding="12dp"
+            android:fontFamily="monospace"
+            android:text="[SYS] Jarvis Engine initialized.\n[SYS] Ready for input.\n"
+            android:textColor="@color/ui_cyan"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+</ScrollView>

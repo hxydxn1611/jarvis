@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Jarvis Assistant</string>
+    <string name="accessibility_service_description">Empowers the assistant to perceive active screen controls, parse UI context, and perform gestures on voice or text commands.</string>
+    <string name="status_ready">SYSTEM READY</string>
+    <string name="status_offline">SYSTEM OFFLINE</string>
+    <string name="enable_accessibility">1. Grant Accessibility (Hands &amp; Eyes)</string>
+    <string name="enable_overlay">2. Enable Floating Quick Controller</string>
+    <string name="enable_notifications">3. Enable Notification Access</string>
+    <string name="api_key_hint">Enter Gemini API Key (Optional)</string>
+    <string name="save_key">Save Key</string>
+    <string name="test_command">Run Voice Command</string>
+</resources>
