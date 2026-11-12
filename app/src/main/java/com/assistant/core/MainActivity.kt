@@ -7,6 +7,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -34,11 +36,20 @@ class MainActivity : AppCompatActivity() {
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.RECORD_AUDIO,
+        Manifest.permission.CAMERA,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION
     )
+
+    private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            handleVisualScan(bitmap)
+        } else {
+            Toast.makeText(this, "Visual scan cancelled", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,6 +100,11 @@ class MainActivity : AppCompatActivity() {
         // Tap on Mic FAB
         binding.fabVoice.setOnClickListener {
             triggerVoiceListening()
+        }
+
+        // Tap on Vision Camera FAB
+        binding.fabVision.setOnClickListener {
+            triggerVisualScan()
         }
 
         // Send Text command via Keyboard
@@ -144,6 +160,46 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun triggerVisualScan() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 103)
+            return
+        }
+        cameraLauncher.launch(null)
+    }
+
+    private fun handleVisualScan(bitmap: Bitmap) {
+        val prompt = binding.etCommand.text?.toString()?.trim() ?: ""
+        binding.etCommand.text?.clear()
+        binding.tvTranscript.text = "You: [Visual Scan Dispatched]\n\nJarvis: "
+        binding.tvCoreState.text = "ANALYZING SCAN..."
+        VoiceManager.resetSpeechTurn()
+
+        scope.launch {
+            val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+            val apiKey = prefs.getString("gemini_api_key", null)
+            val liveTranscript = StringBuilder("You: [Visual Scan]\n\nJarvis: ")
+
+            val (finalSpeech, actions) = brain.analyzeVisualFrameStream(bitmap, prompt, apiKey) { sentenceChunk ->
+                runOnUiThread {
+                    liveTranscript.append(sentenceChunk).append(" ")
+                    binding.tvTranscript.text = liveTranscript.toString()
+                    binding.tvCoreState.text = "SPEAKING..."
+                }
+                VoiceManager.streamSentence(sentenceChunk)
+            }
+
+            runOnUiThread {
+                binding.tvTranscript.text = "You: [Visual Scan]\n\nJarvis: $finalSpeech"
+                binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
+            }
+
+            if (actions.isNotEmpty()) {
+                AssistantAccessibilityService.instance?.executeActions(actions)
+            }
+        }
+    }
+
     private fun handleUserInput(input: String) {
         binding.tvTranscript.text = "You: $input\n\nJarvis: "
         binding.tvCoreState.text = "THINKING..."
@@ -191,16 +247,22 @@ class MainActivity : AppCompatActivity() {
         dialog.setContentView(view)
 
         val etKey = view.findViewById<EditText>(R.id.et_dialog_api_key)
+        val etBridge = view.findViewById<EditText>(R.id.et_dialog_bridge_url)
         val btnSave = view.findViewById<MaterialButton>(R.id.btn_dialog_save)
         val btnAccess = view.findViewById<MaterialButton>(R.id.btn_perm_access)
         val btnOverlay = view.findViewById<MaterialButton>(R.id.btn_perm_overlay)
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         etKey.setText(prefs.getString("gemini_api_key", ""))
+        etBridge.setText(prefs.getString("bridge_url", "http://192.168.1.4:8888"))
 
         btnSave.setOnClickListener {
             val key = etKey.text.toString().trim()
-            prefs.edit().putString("gemini_api_key", key).apply()
+            val bridgeUrl = etBridge.text.toString().trim().ifBlank { "http://192.168.1.4:8888" }
+            prefs.edit()
+                .putString("gemini_api_key", key)
+                .putString("bridge_url", bridgeUrl)
+                .apply()
             dialog.dismiss()
             if (key.isNotBlank()) {
                 Toast.makeText(this, "Super-Intelligence Online!", Toast.LENGTH_SHORT).show()

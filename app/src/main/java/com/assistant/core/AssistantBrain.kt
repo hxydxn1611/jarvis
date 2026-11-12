@@ -1,6 +1,8 @@
 package com.assistant.core
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.util.Base64
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonArray
@@ -12,6 +14,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
@@ -112,7 +115,14 @@ class AssistantBrain(private val context: Context) {
             - OPEN_APP (target: package.name)
             - CLICK_TEXT (target: button text)
             - TYPE_TEXT (value: text)
+            - DISPATCH_DESKTOP_COMMAND (target: powershell command on PC workstation, e.g. "git status", "run build", or script execution)
+            - INSPECT_SCREEN
+            - MORNING_BRIEFING
             - SCROLL_DOWN / SCROLL_UP / GLOBAL_HOME / GLOBAL_BACK / TAKE_SCREENSHOT
+            
+            SPECIAL BEHAVIORS:
+            - If user greets with "Good morning", "morning briefing", or asks for "status report" / "system diagnostics", deliver a full, crisp, tactical morning report summarizing time, battery, One UI update status, and workshop readiness.
+            - If user asks to execute project work, terminal commands, or talk to their PC workstation / Antigravity workspace, acknowledge in your British tone and append DISPATCH_DESKTOP_COMMAND.
             
             If no device action is needed, DO NOT write [ACTIONS: ...]. Just answer conversationally.
             
@@ -162,6 +172,82 @@ class AssistantBrain(private val context: Context) {
         }
 
         Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
+    }
+
+    suspend fun analyzeVisualFrameStream(
+        bitmap: Bitmap,
+        prompt: String,
+        apiKey: String?,
+        onSentenceStream: (String) -> Unit
+    ): Pair<String, List<AssistantAction>> = withContext(Dispatchers.IO) {
+        if (apiKey.isNullOrBlank()) {
+            val offlineMsg = "Optic sensors captured the visual frame, Sir. Please configure your API key in settings to activate neural visual reasoning."
+            onSentenceStream(offlineMsg)
+            return@withContext Pair(offlineMsg, emptyList())
+        }
+
+        val scaledBitmap = if (bitmap.width > 1024 || bitmap.height > 1024) {
+            val ratio = 1024f / Math.max(bitmap.width, bitmap.height)
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
+        } else {
+            bitmap
+        }
+        val outputStream = ByteArrayOutputStream()
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+        val base64Data = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+
+        val cleanPrompt = if (prompt.isNotBlank()) prompt else "Examine this image with deep polymath intelligence. Identify objects, balance any equations or solve circuits, explain what you observe, and advise the user in your calm British persona."
+
+        val jsonBody = JsonObject().apply {
+            val contents = JsonArray()
+            val contentObj = JsonObject()
+            val parts = JsonArray()
+
+            val textPart = JsonObject()
+            textPart.addProperty("text", """
+                You are J.A.R.V.I.S. analyzing visual input from your creator's camera.
+                Persona: British, articulate, witty, world-class scientific polymath.
+                Examine this image in detail. If it contains a chemical formula, equation, circuit, code, diagram, or real-world object, analyze it thoroughly and speak your answer directly to the user.
+                
+                USER INSTRUCTION: $cleanPrompt
+            """.trimIndent())
+            parts.add(textPart)
+
+            val imagePart = JsonObject()
+            val inlineData = JsonObject()
+            inlineData.addProperty("mime_type", "image/jpeg")
+            inlineData.addProperty("data", base64Data)
+            imagePart.add("inline_data", inlineData)
+            parts.add(imagePart)
+
+            contentObj.add("parts", parts)
+            contents.add(contentObj)
+            add("contents", contents)
+        }
+
+        for (model in CANDIDATE_MODELS) {
+            try {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$apiKey&alt=sse"
+                val request = Request.Builder()
+                    .url(url)
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val stream = response.body?.byteStream()
+                    if (stream != null) {
+                        return@withContext parseSseStream(stream, onSentenceStream)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("AssistantBrain", "Visual analysis model $model failed: ${e.message}")
+            }
+        }
+
+        val fallback = "Optic scan received, Sir. However, the neural visual uplink experienced an anomaly."
+        onSentenceStream(fallback)
+        Pair(fallback, emptyList())
     }
 
     private fun parseSseStream(

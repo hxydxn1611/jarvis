@@ -11,9 +11,16 @@ import android.os.BatteryManager
 import android.provider.AlarmClock
 import android.provider.ContactsContract
 import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class DeviceManager(private val context: Context) {
 
@@ -168,5 +175,47 @@ class DeviceManager(private val context: Context) {
     fun getFormattedSystemTime(): String {
         val sdf = SimpleDateFormat("h:mm a, EEEE, MMMM d, yyyy (z)", Locale.getDefault())
         return sdf.format(Date())
+    }
+
+    // --- Antigravity PC Workshop Bridge ---
+    private val networkClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    fun checkBridgeStatus(bridgeUrl: String): Boolean {
+        return try {
+            val req = Request.Builder().url(bridgeUrl).get().build()
+            val res = networkClient.newCall(req).execute()
+            res.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun dispatchDesktopCommand(bridgeUrl: String, command: String): String {
+        return try {
+            val payload = JsonObject().apply {
+                addProperty("command", command)
+            }
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val req = Request.Builder().url(bridgeUrl).post(body).build()
+            val res = networkClient.newCall(req).execute()
+            if (res.isSuccessful) {
+                val responseJson = res.body?.string() ?: ""
+                val obj = Gson().fromJson(responseJson, JsonObject::class.java)
+                val stdout = obj.get("stdout")?.asString ?: ""
+                val stderr = obj.get("stderr")?.asString ?: ""
+                val summary = obj.get("summary")?.asString ?: "Command executed on PC workstation."
+                if (stdout.isNotBlank()) "$summary\nOutput: $stdout"
+                else if (stderr.isNotBlank()) "$summary\nNotice: $stderr"
+                else summary
+            } else {
+                "Workstation returned HTTP error ${res.code}."
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to reach desktop bridge at $bridgeUrl", e)
+            "Unable to reach the desktop workshop at $bridgeUrl. Please verify the PC bridge is online."
+        }
     }
 }

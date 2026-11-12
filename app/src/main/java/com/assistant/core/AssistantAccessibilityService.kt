@@ -164,6 +164,29 @@ class AssistantAccessibilityService : AccessibilityService() {
                             performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
                         }
                     }
+                    ActionType.DISPATCH_DESKTOP_COMMAND -> {
+                        action.target?.let { cmd ->
+                            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                val prefs = getSharedPreferences("AssistantPrefs", android.content.Context.MODE_PRIVATE)
+                                val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888") ?: "http://192.168.1.4:8888"
+                                val result = deviceManager.dispatchDesktopCommand(bridgeUrl, cmd)
+                                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                    VoiceManager.speak(result)
+                                }
+                            }
+                        }
+                    }
+                    ActionType.INSPECT_SCREEN -> {
+                        val elements = dumpVisibleText().take(20).joinToString(", ")
+                        VoiceManager.speak("Screen inspection indicates: $elements, Sir.")
+                    }
+                    ActionType.MORNING_BRIEFING -> {
+                        val time = deviceManager.getFormattedSystemTime()
+                        val batt = deviceManager.getBatteryLevel()
+                        val update = AssistantNotificationService.checkSystemSoftwareUpdate()?.text ?: "Up to date"
+                        val brief = "Good morning, Sir. It is $time. Power reserves stand at $batt percent. Samsung One UI system status: $update. Standing by for instructions."
+                        VoiceManager.speak(brief)
+                    }
                     ActionType.SPEAK -> {
                         action.value?.let { text ->
                             VoiceManager.speak(text)
