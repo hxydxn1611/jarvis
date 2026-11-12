@@ -50,8 +50,8 @@ class FloatingAssistantService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 200
+            x = 60
+            y = 300
         }
 
         var initialX = 0
@@ -91,23 +91,30 @@ class FloatingAssistantService : Service() {
             }
         }
 
-        windowManager?.addView(floatingView, params)
+        try {
+            windowManager?.addView(floatingView, params)
+        } catch (e: Exception) {
+            // Already added or permission revoked
+        }
     }
 
     private fun onBubbleClicked() {
-        VoiceManager.speak("Listening...")
+        VoiceManager.speak("Listening, Sir.")
         VoiceManager.listen(
             context = this,
             onResult = { spokenText ->
                 serviceScope.launch {
                     val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
                     val apiKey = prefs.getString("gemini_api_key", null)
-                    val actions = brain.processCommand(spokenText, apiKey)
-                    AssistantAccessibilityService.instance?.executeActions(actions)
+                    val (speech, actions) = brain.processCommand(spokenText, apiKey)
+                    VoiceManager.speak(speech)
+                    if (actions.isNotEmpty()) {
+                        AssistantAccessibilityService.instance?.executeActions(actions)
+                    }
                 }
             },
-            onError = { err ->
-                VoiceManager.speak("Could not recognize command.")
+            onError = { _ ->
+                VoiceManager.speak("Standing by.")
             }
         )
     }
@@ -115,8 +122,9 @@ class FloatingAssistantService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         if (floatingView != null) {
-            windowManager?.removeView(floatingView)
+            try {
+                windowManager?.removeView(floatingView)
+            } catch (e: Exception) {}
         }
     }
 }
-

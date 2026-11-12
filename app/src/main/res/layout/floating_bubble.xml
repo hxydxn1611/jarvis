@@ -5,18 +5,15 @@
 
     <View
         android:id="@+id/bubble_view"
-        android:layout_width="60dp"
-        android:layout_height="60dp"
-        android:background="@drawable/arc_reactor_bubble" />
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/floating_orb" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+    <ImageView
+        android:layout_width="22dp"
+        android:layout_height="22dp"
         android:layout_gravity="center"
-        android:text="J"
-        android:textColor="#00E5FF"
-        android:textSize="22sp"
-        android:textStyle="bold" />
+        android:src="@android:drawable/ic_btn_speak_now"
+        android:tint="#00E5FF" />
 
 </FrameLayout>
-

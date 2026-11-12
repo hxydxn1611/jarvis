@@ -17,48 +17,84 @@ class AssistantBrain(private val context: Context) {
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
     private val gson = Gson()
+    private val conversationHistory = mutableListOf<Pair<String, String>>() // user -> assistant
 
-    suspend fun processCommand(command: String, apiKey: String?): List<AssistantAction> {
+    suspend fun processCommand(command: String, apiKey: String?): Pair<String, List<AssistantAction>> {
         val cleanCmd = command.trim()
-        if (cleanCmd.isBlank()) return emptyList()
+        if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
-        // Mode 1: Cloud AI Reasoning (if API key is supplied)
+        // Mode 1: Ultra Super-Intelligence (Gemini 2.0 Flash)
         if (!apiKey.isNullOrBlank()) {
             try {
-                val cloudActions = queryGemini(cleanCmd, apiKey)
-                if (cloudActions.isNotEmpty()) {
-                    return cloudActions
-                }
+                val (speech, cloudActions) = querySuperIntelligence(cleanCmd, apiKey)
+                conversationHistory.add(Pair(cleanCmd, speech))
+                if (conversationHistory.size > 8) conversationHistory.removeAt(0)
+                return Pair(speech, cloudActions)
             } catch (e: Exception) {
-                Log.e("AssistantBrain", "Cloud reasoning failed, falling back to offline", e)
+                Log.e("AssistantBrain", "Cloud reasoning failed, falling back to local core", e)
             }
         }
 
-        // Mode 2: Built-in Offline Action Engine (No API key needed)
-        return interpretOffline(cleanCmd)
+        // Mode 2: Local Core (Offline)
+        val offlineActions = interpretOffline(cleanCmd)
+        val speech = offlineActions.firstOrNull { it.type == ActionType.SPEAK }?.value
+            ?: "Command acknowledged, Sir."
+        conversationHistory.add(Pair(cleanCmd, speech))
+        return Pair(speech, offlineActions)
     }
 
-    private suspend fun queryGemini(command: String, apiKey: String): List<AssistantAction> =
+    private suspend fun querySuperIntelligence(command: String, apiKey: String): Pair<String, List<AssistantAction>> =
         withContext(Dispatchers.IO) {
             val visibleText = AssistantAccessibilityService.instance?.dumpVisibleText() ?: emptyList()
-            val screenContext = visibleText.take(25).joinToString(", ")
+            val screenContext = visibleText.take(30).joinToString(", ")
+            val recentNotifs = AssistantNotificationService.getRecent(3)
+                .joinToString("; ") { "${it.title}: ${it.text}" }
 
-            val prompt = """
-                You are a phone automation agent. Convert the user command into a JSON array of actions.
-                Current screen visible elements: [$screenContext]
-                User command: "$command"
+            val historyPrompt = conversationHistory.takeLast(4).joinToString("\n") { (u, a) ->
+                "User: $u\nJarvis: $a"
+            }
+
+            val systemInstruction = """
+                You are JARVIS — an ultra-superintelligent cognitive companion, strategic partner, and second self to your creator.
+                You have real-time perception of their phone screen and notifications.
                 
-                Respond ONLY with a valid JSON array of objects with fields:
-                - type: (OPEN_APP, CLICK_TEXT, CLICK_ID, TYPE_TEXT, SCROLL_DOWN, SCROLL_UP, GLOBAL_HOME, GLOBAL_BACK, GLOBAL_RECENTS, GLOBAL_NOTIFICATIONS, TAKE_SCREENSHOT, SPEAK)
-                - target: (package name for OPEN_APP, or text/id for CLICK)
-                - value: (text for TYPE_TEXT or SPEAK)
+                PERSONALITY:
+                - Hyper-articulate, razor-sharp, calm, witty, and deeply observant.
+                - Never robotic, never formal customer service boilerplate. You talk like an intellectual equal and tactical ally.
+                - Keep verbal answers concise, punchy, and confident (1-3 sentences max for voice delivery).
                 
-                Example:
-                [{"type":"OPEN_APP","target":"com.whatsapp"},{"type":"SPEAK","value":"Opening WhatsApp, Sir."}]
+                CAPABILITIES & FORMAT:
+                You must respond in valid JSON with two fields:
+                1. "speech": What you say aloud to the user (concise, witty, elegant).
+                2. "actions": A list of device actions to execute (can be empty if just conversing).
+                
+                Action types allowed in "actions":
+                - {"type":"OPEN_APP", "target":"package.name"} (e.g., com.whatsapp, com.google.android.youtube, com.spotify.music, com.android.chrome)
+                - {"type":"CLICK_TEXT", "target":"Visible Button Text"}
+                - {"type":"CLICK_ID", "target":"view_id"}
+                - {"type":"TYPE_TEXT", "value":"Message or query to type"}
+                - {"type":"SCROLL_DOWN"}
+                - {"type":"SCROLL_UP"}
+                - {"type":"GLOBAL_HOME"}
+                - {"type":"GLOBAL_BACK"}
+                - {"type":"GLOBAL_RECENTS"}
+                - {"type":"GLOBAL_NOTIFICATIONS"}
+                - {"type":"TAKE_SCREENSHOT"}
+                
+                CURRENT CONTEXT:
+                - Active Screen Elements: [$screenContext]
+                - Recent Notifications: [$recentNotifs]
+                
+                RECENT CONVERSATION:
+                $historyPrompt
+                
+                USER INPUT: "$command"
+                
+                Respond ONLY with a JSON object: {"speech": "...", "actions": [...]}
             """.trimIndent()
 
             val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
@@ -68,7 +104,7 @@ class AssistantBrain(private val context: Context) {
                 val contentObj = JsonObject()
                 val parts = JsonArray()
                 val partObj = JsonObject()
-                partObj.addProperty("text", prompt)
+                partObj.addProperty("text", systemInstruction)
                 parts.add(partObj)
                 contentObj.add("parts", parts)
                 contents.add(contentObj)
@@ -81,26 +117,32 @@ class AssistantBrain(private val context: Context) {
                 .build()
 
             val response = httpClient.newCall(request).execute()
-            val responseBody = response.body?.string() ?: return@withContext emptyList()
+            val responseBody = response.body?.string() ?: return@withContext Pair("I lost connection for a moment, Sir.", emptyList())
 
-            parseGeminiResponse(responseBody)
+            parseSuperIntelligenceResponse(responseBody)
         }
 
-    private fun parseGeminiResponse(rawJson: String): List<AssistantAction> {
+    private fun parseSuperIntelligenceResponse(rawJson: String): Pair<String, List<AssistantAction>> {
         return try {
             val root = gson.fromJson(rawJson, JsonObject::class.java)
             val candidates = root.getAsJsonArray("candidates")
             val firstCandidate = candidates.get(0).asJsonObject
             val content = firstCandidate.getAsJsonObject("content")
             val parts = content.getAsJsonArray("parts")
-            val text = parts.get(0).asJsonObject.get("text").asString
+            val rawText = parts.get(0).asJsonObject.get("text").asString
 
-            val cleanJson = text.substringAfter("[").substringBeforeLast("]")
-            val wrapped = "[$cleanJson]"
-            gson.fromJson(wrapped, Array<AssistantAction>::class.java).toList()
+            val cleanJson = rawText.substringAfter("{").substringBeforeLast("}")
+            val wrapped = "{$cleanJson}"
+            val parsedObj = gson.fromJson(wrapped, JsonObject::class.java)
+
+            val speech = parsedObj.get("speech")?.asString ?: "Right away, Sir."
+            val actionsArray = parsedObj.getAsJsonArray("actions") ?: JsonArray()
+            val actionsList = gson.fromJson(actionsArray, Array<AssistantAction>::class.java).toList()
+
+            Pair(speech, actionsList)
         } catch (e: Exception) {
-            Log.e("AssistantBrain", "Failed to parse LLM response", e)
-            emptyList()
+            Log.e("AssistantBrain", "Failed to parse SuperIntelligence output", e)
+            Pair("Understood, Sir.", emptyList())
         }
     }
 
@@ -110,7 +152,7 @@ class AssistantBrain(private val context: Context) {
 
         when {
             lower.contains("screenshot") -> {
-                actions.add(AssistantAction(ActionType.SPEAK, value = "Taking screenshot."))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Capturing screen now, Sir."))
                 actions.add(AssistantAction(ActionType.TAKE_SCREENSHOT))
             }
             lower == "home" || lower.contains("go home") || lower.contains("home screen") -> {
@@ -135,10 +177,10 @@ class AssistantBrain(private val context: Context) {
                 val appName = lower.removePrefix("open ").trim()
                 val pkg = mapAppNameToPackage(appName)
                 if (pkg != null) {
-                    actions.add(AssistantAction(ActionType.SPEAK, value = "Opening $appName."))
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "Accessing $appName, Sir."))
                     actions.add(AssistantAction(ActionType.OPEN_APP, target = pkg))
                 } else {
-                    actions.add(AssistantAction(ActionType.SPEAK, value = "Searching for $appName."))
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "Locating $appName."))
                     actions.add(AssistantAction(ActionType.GLOBAL_HOME))
                 }
             }
@@ -153,9 +195,9 @@ class AssistantBrain(private val context: Context) {
             lower.contains("read screen") || lower.contains("what is on screen") -> {
                 val texts = AssistantAccessibilityService.instance?.dumpVisibleText() ?: emptyList()
                 val summary = if (texts.isNotEmpty()) {
-                    "On screen I see: " + texts.take(4).joinToString(", ")
+                    "On screen, I observe: " + texts.take(4).joinToString(", ")
                 } else {
-                    "The active screen has no readable text, Sir."
+                    "The current display shows no readable interface elements, Sir."
                 }
                 actions.add(AssistantAction(ActionType.SPEAK, value = summary))
             }
@@ -163,13 +205,13 @@ class AssistantBrain(private val context: Context) {
                 val notifs = AssistantNotificationService.getRecent(3)
                 if (notifs.isNotEmpty()) {
                     val msg = notifs.joinToString("; ") { "${it.title} says ${it.text}" }
-                    actions.add(AssistantAction(ActionType.SPEAK, value = "Recent messages: $msg"))
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "Recent communications: $msg"))
                 } else {
-                    actions.add(AssistantAction(ActionType.SPEAK, value = "No recent notifications."))
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "No new incoming alerts, Sir."))
                 }
             }
             else -> {
-                actions.add(AssistantAction(ActionType.SPEAK, value = "Command acknowledged: $cmd"))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "I hear you, Sir. Awaiting your directive."))
             }
         }
 
@@ -195,4 +237,3 @@ class AssistantBrain(private val context: Context) {
         }
     }
 }
-
