@@ -57,8 +57,6 @@ class ProactiveMonitorService : Service() {
         )
         startPeriodicAuditor()
     }
-        startPeriodicAuditor()
-    }
 
     private fun startPeriodicAuditor() {
         monitorJob = serviceScope.launch {

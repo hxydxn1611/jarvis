@@ -190,19 +190,19 @@ class AssistantAccessibilityService : AccessibilityService() {
                     ActionType.SEND_WHATSAPP -> {
                         val target = action.target ?: ""
                         val msg = action.value ?: ""
-                        GhostPilot.sendWhatsApp(this, target, msg) { _, speech ->
+                        GhostPilot.sendWhatsApp(this@AssistantAccessibilityService, target, msg) { _, speech ->
                             VoiceManager.speak(speech)
                         }
                     }
                     ActionType.PLAY_YOUTUBE -> {
                         val query = action.target ?: action.value ?: ""
-                        GhostPilot.playYouTube(this, query) { _, speech ->
+                        GhostPilot.playYouTube(this@AssistantAccessibilityService, query) { _, speech ->
                             VoiceManager.speak(speech)
                         }
                     }
                     ActionType.TOGGLE_SENTRY_MODE -> {
                         val enable = action.value == "true"
-                        SecuritySentinel.setSentryMode(this, enable)
+                        SecuritySentinel.setSentryMode(this@AssistantAccessibilityService, enable)
                     }
                     ActionType.SPEAK -> {
                         action.value?.let { text ->
