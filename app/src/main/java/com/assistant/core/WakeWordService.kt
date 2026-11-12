@@ -53,52 +53,54 @@ class WakeWordService : Service() {
         }
 
         speechRecognizer?.destroy()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    isListening = true
-                }
-
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-
-                override fun onError(error: Int) {
-                    isListening = false
-                    // Re-arm listener after brief cooldown (unless destroyed)
-                    scope.launch {
-                        delay(600)
-                        restartRecognizer()
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        isListening = true
                     }
-                }
 
-                override fun onResults(results: Bundle?) {
-                    isListening = false
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val spoken = matches?.firstOrNull()?.lowercase() ?: ""
-                    handleDetectedUtterance(spoken)
-                    
-                    scope.launch {
-                        delay(800)
-                        restartRecognizer()
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {}
+
+                    override fun onError(error: Int) {
+                        isListening = false
+                        scope.launch {
+                            delay(800)
+                            restartRecognizer()
+                        }
                     }
-                }
 
-                override fun onPartialResults(partialResults: Bundle?) {
-                    val partialMatches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val partial = partialMatches?.firstOrNull()?.lowercase() ?: ""
-                    if (partial.contains("jarvis") || partial.contains("hey jarvis")) {
-                        // Immediate fast trigger
-                        speechRecognizer?.stopListening()
+                    override fun onResults(results: Bundle?) {
+                        isListening = false
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val spoken = matches?.firstOrNull()?.lowercase() ?: ""
+                        handleDetectedUtterance(spoken)
+                        
+                        scope.launch {
+                            delay(800)
+                            restartRecognizer()
+                        }
                     }
-                }
 
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val partialMatches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val partial = partialMatches?.firstOrNull()?.lowercase() ?: ""
+                        if (partial.contains("jarvis") || partial.contains("hey jarvis")) {
+                            speechRecognizer?.stopListening()
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            }
+            restartRecognizer()
+        } catch (e: Exception) {
+            Log.e(TAG, "SpeechRecognizer initialization failed in background service", e)
+            isListening = false
         }
-
-        restartRecognizer()
     }
 
     private fun restartRecognizer() {

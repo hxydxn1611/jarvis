@@ -2,6 +2,7 @@ package com.assistant.core
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Context
 import android.content.Intent
 import android.graphics.Path
 import android.os.Build
@@ -28,11 +29,53 @@ class AssistantAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main)
     private lateinit var deviceManager: DeviceManager
 
+    private var hasAlertedLowBattery = false
+    private var lastSoftwareUpdateText: String? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         deviceManager = DeviceManager(this)
         Log.i(TAG, "Jarvis Accessibility Service connected & active.")
+        startProactiveAuditor()
+    }
+
+    private fun startProactiveAuditor() {
+        serviceScope.launch(Dispatchers.Default) {
+            while (isRunning) {
+                delay(30_000)
+                try {
+                    val level = deviceManager.getBatteryLevel()
+                    if (level in 1..15 && !hasAlertedLowBattery) {
+                        hasAlertedLowBattery = true
+                        SoundEffectManager.playAlertChime()
+                        VoiceManager.speak("Pardon the interruption, Sir. Power reserves have depleted to $level percent. Recommend connecting to an external power supply.")
+                    } else if (level > 25) {
+                        hasAlertedLowBattery = false
+                    }
+
+                    val updateNotif = AssistantNotificationService.checkSystemSoftwareUpdate()
+                    if (updateNotif != null && updateNotif.text != lastSoftwareUpdateText) {
+                        lastSoftwareUpdateText = updateNotif.text
+                        SoundEffectManager.playAlertChime()
+                        delay(400)
+                        VoiceManager.speak("Pardon the interruption, Sir. A Samsung One UI system software update has arrived: ${updateNotif.text}")
+                    }
+
+                    val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+                    val bridgeUrl = prefs.getString("bridge_url", "http://192.168.1.4:8888")
+                    if (!bridgeUrl.isNullOrBlank()) {
+                        val jobResult = deviceManager.dispatchDesktopCommand(bridgeUrl, "Get-Content -Path .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                        if (jobResult.isNotBlank() && jobResult.contains("[JOB_COMPLETED:")) {
+                            val jobTitle = jobResult.substringAfter("[JOB_COMPLETED:").substringBefore("]")
+                            deviceManager.dispatchDesktopCommand(bridgeUrl, "Remove-Item .jarvis_last_job.txt -ErrorAction SilentlyContinue")
+                            SoundEffectManager.playConfirmChirp()
+                            VoiceManager.speak("Sir, your workstation has completed the background task: $jobTitle.")
+                        }
+                    }
+                } catch (e: Exception) {}
+            }
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}

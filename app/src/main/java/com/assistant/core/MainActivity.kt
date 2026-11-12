@@ -11,7 +11,10 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -53,6 +56,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e("JarvisCrash", "Uncaught exception in ${thread.name}", throwable)
+        }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -142,7 +148,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        SoundEffectManager.playWakeChime()
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+
         setCoreActive(true)
         binding.tvCoreState.text = "LISTENING..."
         binding.tvTranscript.text = "Listening to you, Sir..."
@@ -291,12 +301,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnWakeWord.setOnClickListener {
-            if (WakeWordService.isListening) {
-                stopService(Intent(this, WakeWordService::class.java))
-                Toast.makeText(this, "Wake Array Disarmed", Toast.LENGTH_SHORT).show()
-            } else {
-                startService(Intent(this, WakeWordService::class.java))
-                Toast.makeText(this, "Hands-Free Wake Array Active ('Hey Jarvis')", Toast.LENGTH_SHORT).show()
+            try {
+                if (WakeWordService.isListening) {
+                    stopService(Intent(this, WakeWordService::class.java))
+                    Toast.makeText(this, "Wake Array Disarmed", Toast.LENGTH_SHORT).show()
+                } else {
+                    startService(Intent(this, WakeWordService::class.java))
+                    Toast.makeText(this, "Hands-Free Wake Array Active ('Hey Jarvis')", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this, "Wake Array initialization restricted by OS", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -319,10 +333,11 @@ class MainActivity : AppCompatActivity() {
             binding.tvPermMessage.text = "Grant $missing permission for full control."
         } else {
             binding.cardPermissionAlert.visibility = View.GONE
-            // Auto start floating orb and proactive telemetry if authorized
-            startService(Intent(this, FloatingAssistantService::class.java))
-            if (!ProactiveMonitorService.isRunning) {
-                startService(Intent(this, ProactiveMonitorService::class.java))
+            // Auto start floating orb safely if authorized
+            try {
+                startService(Intent(this, FloatingAssistantService::class.java))
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Floating orb start error", e)
             }
         }
 
