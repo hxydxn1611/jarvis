@@ -32,6 +32,13 @@ class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(Dispatchers.Main)
     private var coreAnimator: ObjectAnimator? = null
 
+    private val requiredPermissions = arrayOf(
+        Manifest.permission.RECORD_AUDIO,
+        Manifest.permission.CALL_PHONE,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -43,11 +50,21 @@ class MainActivity : AppCompatActivity() {
         startCoreAnimation()
         setupInteractions()
         checkPermissionsState()
+        requestRuntimePermissionsIfNeeded()
     }
 
     override fun onResume() {
         super.onResume()
         checkPermissionsState()
+    }
+
+    private fun requestRuntimePermissionsIfNeeded() {
+        val missing = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 102)
+        }
     }
 
     private fun startCoreAnimation() {
@@ -118,10 +135,10 @@ class MainActivity : AppCompatActivity() {
                 setCoreActive(false)
                 handleUserInput(spokenText)
             },
-            onError = { err ->
+            onError = { _ ->
                 setCoreActive(false)
                 binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
-                binding.tvTranscript.text = "Jarvis: I couldn't quite hear you, Sir."
+                binding.tvTranscript.text = "Jarvis: Standing by, Sir."
             }
         )
     }
@@ -139,7 +156,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvTranscript.text = "You: $input\n\nJarvis: $speech"
             binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
 
-            // Speak response aloud
+            // Speak response aloud with British cadence
             VoiceManager.speak(speech)
 
             // Execute device actions

@@ -26,19 +26,19 @@ class AssistantAccessibilityService : AccessibilityService() {
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private lateinit var deviceManager: DeviceManager
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        Log.i(TAG, "Assistant Accessibility Service connected & active.")
+        deviceManager = DeviceManager(this)
+        Log.i(TAG, "Jarvis Accessibility Service connected & active.")
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Track active window/package if needed
-    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
     override fun onInterrupt() {
-        Log.w(TAG, "Assistant Accessibility Service interrupted.")
+        Log.w(TAG, "Jarvis Accessibility Service interrupted.")
     }
 
     override fun onDestroy() {
@@ -78,7 +78,7 @@ class AssistantAccessibilityService : AccessibilityService() {
                             if (intent != null) {
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 startActivity(intent)
-                                delay(1200) // Allow UI transition
+                                delay(1200)
                             }
                         }
                     }
@@ -98,6 +98,41 @@ class AssistantAccessibilityService : AccessibilityService() {
                         action.value?.let { text ->
                             typeTextIntoFocusedOrTarget(text, action.target)
                             delay(500)
+                        }
+                    }
+                    ActionType.CALL_PHONE -> {
+                        action.target?.let { number ->
+                            deviceManager.makeCall(number)
+                            delay(800)
+                        }
+                    }
+                    ActionType.SEND_EMAIL -> {
+                        val recipient = action.target ?: ""
+                        val subject = action.value ?: "Message from Jarvis"
+                        val body = action.extra ?: ""
+                        deviceManager.sendEmail(recipient, subject, body)
+                        delay(800)
+                    }
+                    ActionType.SET_ALARM -> {
+                        val hour = action.target?.toIntOrNull() ?: 7
+                        val minute = action.value?.toIntOrNull() ?: 0
+                        val msg = action.extra ?: "Alarm"
+                        deviceManager.setAlarm(hour, minute, msg)
+                        delay(600)
+                    }
+                    ActionType.PLAY_SPOTIFY -> {
+                        action.target?.let { query ->
+                            deviceManager.playMusic(query)
+                            delay(800)
+                        }
+                    }
+                    ActionType.FLASHLIGHT_TOGGLE -> {
+                        val enable = action.value != "false"
+                        deviceManager.toggleTorch(enable)
+                    }
+                    ActionType.SAVE_MEMORY -> {
+                        if (!action.target.isNullOrBlank() && !action.value.isNullOrBlank()) {
+                            MemoryCore.saveFact(this@AssistantAccessibilityService, action.target, action.value)
                         }
                     }
                     ActionType.SCROLL_DOWN -> {
@@ -134,7 +169,6 @@ class AssistantAccessibilityService : AccessibilityService() {
                             VoiceManager.speak(text)
                         }
                     }
-                    else -> Unit
                 }
             }
             onComplete?.invoke(true)
@@ -225,4 +259,3 @@ class AssistantAccessibilityService : AccessibilityService() {
         dispatchGesture(gesture, null, null)
     }
 }
-

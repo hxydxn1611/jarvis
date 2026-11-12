@@ -9,6 +9,7 @@ data class NotificationItem(
     val packageName: String,
     val title: String,
     val text: String,
+    val isSystemAlert: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -21,9 +22,15 @@ class AssistantNotificationService : NotificationListenerService() {
 
         private val recentNotifications = mutableListOf<NotificationItem>()
 
-        fun getRecent(limit: Int = 5): List<NotificationItem> {
+        fun getRecent(limit: Int = 6): List<NotificationItem> {
             synchronized(recentNotifications) {
                 return recentNotifications.takeLast(limit).reversed()
+            }
+        }
+
+        fun checkSystemSoftwareUpdate(): NotificationItem? {
+            synchronized(recentNotifications) {
+                return recentNotifications.firstOrNull { it.isSystemAlert }
             }
         }
     }
@@ -31,7 +38,7 @@ class AssistantNotificationService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this
-        Log.i(TAG, "Assistant Notification Listener active.")
+        Log.i(TAG, "Jarvis Notification Listener active.")
     }
 
     override fun onListenerDisconnected() {
@@ -48,10 +55,20 @@ class AssistantNotificationService : NotificationListenerService() {
 
         if (title.isBlank() && text.isBlank()) return
 
+        val pkg = sbn.packageName.lowercase()
+        val combined = "$title $text".lowercase()
+
+        // Detect Samsung One UI / Android System Software Updates
+        val isUpdate = pkg.contains("wssyncmldm") || 
+                       pkg.contains("soagent") || 
+                       pkg.contains("fota") ||
+                       (pkg == "android" && (combined.contains("update") || combined.contains("firmware") || combined.contains("restart to update")))
+
         val item = NotificationItem(
             packageName = sbn.packageName,
             title = title,
-            text = text
+            text = text,
+            isSystemAlert = isUpdate
         )
 
         synchronized(recentNotifications) {
@@ -61,7 +78,9 @@ class AssistantNotificationService : NotificationListenerService() {
             }
         }
 
-        Log.d(TAG, "Notification received from ${sbn.packageName}: $title -> $text")
+        // Proactive Jarvis announcement for Samsung system updates
+        if (isUpdate) {
+            VoiceManager.speak("Sir, Samsung has dispatched a new software update for your device.")
+        }
     }
 }
-

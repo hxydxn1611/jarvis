@@ -12,15 +12,18 @@ enum class ActionType {
     GLOBAL_RECENTS,
     GLOBAL_NOTIFICATIONS,
     TAKE_SCREENSHOT,
-    FLASHLIGHT,
-    VOLUME_UP,
-    VOLUME_DOWN,
+    CALL_PHONE,
+    SEND_EMAIL,
+    SET_ALARM,
+    FLASHLIGHT_TOGGLE,
+    PLAY_SPOTIFY,
+    SAVE_MEMORY,
     SPEAK
 }
 
 data class AssistantAction(
     val type: ActionType,
     val target: String? = null,
-    val value: String? = null
+    val value: String? = null,
+    val extra: String? = null
 )
-

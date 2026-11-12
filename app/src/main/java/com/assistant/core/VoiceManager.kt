@@ -24,30 +24,34 @@ object VoiceManager : TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale.US
-            tts?.setPitch(0.95f)
-            tts?.setSpeechRate(1.05f)
+            // British English Persona
+            val result = tts?.setLanguage(Locale.UK)
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                tts?.setLanguage(Locale.ENGLISH)
+            }
+            tts?.setPitch(0.92f)
+            tts?.setSpeechRate(1.03f)
             isTtsReady = true
-            Log.i(TAG, "TTS initialized.")
+            Log.i(TAG, "British Persona TTS Engine Initialized.")
         }
     }
 
     fun speak(text: String) {
         if (isTtsReady && text.isNotBlank()) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "UTTERANCE_ID")
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_VOICE_UTTERANCE")
         }
     }
 
     fun listen(context: Context, onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError?.invoke("Speech recognition not available on device.")
+            onError?.invoke("Speech recognition unavailable.")
             return
         }
 
         val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
 
@@ -58,7 +62,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onError(error: Int) {
-                onError?.invoke("Speech error code: $error")
+                onError?.invoke("Code: $error")
                 recognizer.destroy()
             }
             override fun onResults(results: Bundle?) {
@@ -82,4 +86,3 @@ object VoiceManager : TextToSpeech.OnInitListener {
         isTtsReady = false
     }
 }
-
