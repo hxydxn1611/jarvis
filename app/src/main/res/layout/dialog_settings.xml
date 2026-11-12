@@ -166,5 +166,16 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_dialog_tts"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="🎙️ CONFIGURE MALE VOICE (TTS SETTINGS)"
+        android:textColor="#00E5FF"
+        app:strokeColor="#00E5FF"
+        android:textSize="11sp" />
+
 </LinearLayout>
 

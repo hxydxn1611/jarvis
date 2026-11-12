@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
 class AssistantBrain(private val context: Context) {
 
     companion object {
-        val CANDIDATE_MODELS = listOf("gemini-flash-latest", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3-flash-preview")
+        val CANDIDATE_MODELS = listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.5-flash")
     }
 
     private val httpClient = OkHttpClient.Builder()
@@ -439,7 +439,7 @@ class AssistantBrain(private val context: Context) {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Photosynthesis balances as: 6 CO2 + 6 H2O plus light energy yields C6H12O6 plus 6 O2."))
             }
             else -> {
-                actions.add(AssistantAction(ActionType.SPEAK, value = "Awaiting your directive, Sir."))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Super-intelligence core is currently offline, Sir. Please configure your Gemini API Key in Settings to unlock complete reasoning."))
             }
         }
 

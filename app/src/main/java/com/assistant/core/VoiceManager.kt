@@ -32,10 +32,24 @@ object VoiceManager : TextToSpeech.OnInitListener {
     fun init(context: Context) {
         if (tts == null) {
             try {
-                Log.i(TAG, "Initializing System TextToSpeech Engine")
-                tts = TextToSpeech(context.applicationContext, this)
+                val hasGoogleTts = try {
+                    context.packageManager.getPackageInfo("com.google.android.tts", 0) != null
+                } catch (e: Exception) {
+                    false
+                }
+                Log.i(TAG, "Initializing System TextToSpeech Engine (hasGoogleTts=$hasGoogleTts)")
+                tts = if (hasGoogleTts) {
+                    TextToSpeech(context.applicationContext, this, "com.google.android.tts")
+                } else {
+                    TextToSpeech(context.applicationContext, this)
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "TTS initialization failed", e)
+                Log.e(TAG, "TTS initialization failed, falling back to default engine", e)
+                try {
+                    tts = TextToSpeech(context.applicationContext, this)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Default TTS initialization failed", e2)
+                }
             }
         }
     }
@@ -57,7 +71,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             val voices = tts?.voices
             if (!voices.isNullOrEmpty()) {
-                // Tier 1: British Male voices (e.g. en-gb-x-rjs-local, en-gb-x-gbd, en_gb_m01)
+                // Tier 1: British Male voices (e.g. en-gb-x-rjs-local, en-gb-x-gbd, en_gb_m01, #male)
                 val ukMale = voices.firstOrNull { voice ->
                     val isUk = voice.locale.country.equals("GB", ignoreCase = true) || 
                                voice.locale.language.equals("en", ignoreCase = true)
@@ -65,7 +79,8 @@ object VoiceManager : TextToSpeech.OnInitListener {
                     val isExplicitlyMale = (name.contains("male") || name.contains("rjs") || 
                                            name.contains("gbd") || name.contains("gba") || 
                                            name.contains("gbb") || name.contains("_m0") || 
-                                           name.contains("-m0")) && 
+                                           name.contains("-m0") || name.contains("voice 2") ||
+                                           name.contains("voice 4") || name.contains("#male")) && 
                                            !name.contains("female") && !name.contains("_f0") && !name.contains("-f0")
                     isUk && isExplicitlyMale
                 }
@@ -77,7 +92,9 @@ object VoiceManager : TextToSpeech.OnInitListener {
                     val isExplicitlyMale = (name.contains("male") || name.contains("man") || 
                                            name.contains("rjs") || name.contains("gbd") || 
                                            name.contains("sfg") || name.contains("iol") || 
-                                           name.contains("_m0") || name.contains("-m0")) && 
+                                           name.contains("_m0") || name.contains("-m0") ||
+                                           name.contains("voice 2") || name.contains("voice 4") ||
+                                           name.contains("#male")) && 
                                            !name.contains("female") && !name.contains("_f0") && !name.contains("-f0")
                     isEnglish && isExplicitlyMale
                 }
@@ -98,8 +115,8 @@ object VoiceManager : TextToSpeech.OnInitListener {
             }
         }
 
-        // Deep baritone British pitch (0.78f) and natural speech tempo
-        tts?.setPitch(0.78f)
+        // Deep baritone British pitch (0.72f) and natural speech tempo
+        tts?.setPitch(0.72f)
         tts?.setSpeechRate(1.00f)
     }
 

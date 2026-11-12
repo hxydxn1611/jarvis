@@ -396,10 +396,12 @@ class MainActivity : AppCompatActivity() {
                 binding.tvCoreState.text = "LISTENING SIR..."
                 binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir."
 
-                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-                }
+                try {
+                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                    }
+                } catch (e: Exception) {}
 
                 VoiceManager.speak("At your service, Sir.") {
                     scope.launch {
@@ -543,10 +545,12 @@ class MainActivity : AppCompatActivity() {
         binding.tvTranscript.text = "CLEAN SLATE PROTOCOL INITIATED...\nPurging neural cache & workspace..."
         binding.tvCoreState.text = "CLEAN SLATE ACTIVE"
 
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 50, 80), -1))
-        }
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 80, 50, 80), -1))
+            }
+        } catch (e: Exception) {}
 
         binding.etCommand.text?.clear()
         binding.dialogueContainer.fullScroll(View.FOCUS_UP)
@@ -672,10 +676,12 @@ class MainActivity : AppCompatActivity() {
             stopAmbientWakeWordListener()
             isProcessingCommand = true
 
-            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
-            }
+            try {
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
+            } catch (e: Exception) {}
 
             setCoreActive(true)
             binding.tvCoreState.text = "LISTENING..."
@@ -902,6 +908,16 @@ class MainActivity : AppCompatActivity() {
             val active = SecuritySentinel.isSentryModeActive(this)
             SecuritySentinel.setSentryMode(this, !active)
             Toast.makeText(this, if (!active) "House Protocol Armed!" else "House Protocol Disarmed", Toast.LENGTH_SHORT).show()
+        }
+
+        view.findViewById<MaterialButton>(R.id.btn_dialog_tts).setOnClickListener {
+            try {
+                startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+            } catch (e: Exception) {
+                try {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                } catch (e2: Exception) {}
+            }
         }
 
         dialog.show()
