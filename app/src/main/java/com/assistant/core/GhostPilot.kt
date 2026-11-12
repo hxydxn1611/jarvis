@@ -1,6 +1,6 @@
 package com.assistant.core
 
-import android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
+import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -54,7 +54,7 @@ object GhostPilot {
                     // Find and click the WhatsApp send button
                     val clicked = clickSendButton(service)
                     delay(1000)
-                    service.performGlobalAction(GLOBAL_ACTION_HOME)
+                    service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
 
                     if (clicked) {
                         onComplete(true, "WhatsApp transmission dispatched to $targetContactOrNumber, Sir.")
@@ -76,7 +76,7 @@ object GhostPilot {
                         // Type message & send
                         typeAndSendInCurrentChat(service, message)
                         delay(800)
-                        service.performGlobalAction(GLOBAL_ACTION_HOME)
+                        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
                         onComplete(true, "Autonomous WhatsApp navigation completed for $targetContactOrNumber, Sir.")
                     } else {
                         onComplete(false, "WhatsApp is not installed on this terminal, Sir.")

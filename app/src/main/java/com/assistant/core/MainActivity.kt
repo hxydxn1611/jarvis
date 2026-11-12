@@ -295,11 +295,7 @@ class MainActivity : AppCompatActivity() {
                 stopService(Intent(this, WakeWordService::class.java))
                 Toast.makeText(this, "Wake Array Disarmed", Toast.LENGTH_SHORT).show()
             } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(Intent(this, WakeWordService::class.java))
-                } else {
-                    startService(Intent(this, WakeWordService::class.java))
-                }
+                startService(Intent(this, WakeWordService::class.java))
                 Toast.makeText(this, "Hands-Free Wake Array Active ('Hey Jarvis')", Toast.LENGTH_SHORT).show()
             }
         }
@@ -326,12 +322,7 @@ class MainActivity : AppCompatActivity() {
             // Auto start floating orb and proactive telemetry if authorized
             startService(Intent(this, FloatingAssistantService::class.java))
             if (!ProactiveMonitorService.isRunning) {
-                val proactiveIntent = Intent(this, ProactiveMonitorService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(proactiveIntent)
-                } else {
-                    startService(proactiveIntent)
-                }
+                startService(Intent(this, ProactiveMonitorService::class.java))
             }
         }
 

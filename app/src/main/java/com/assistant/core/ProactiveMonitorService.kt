@@ -1,17 +1,13 @@
 package com.assistant.core
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,15 +23,12 @@ import kotlinx.coroutines.launch
 class ProactiveMonitorService : Service() {
 
     companion object {
-        private const val CHANNEL_ID = "jarvis_proactive_channel"
-        private const val NOTIFICATION_ID = 2001
         var isRunning = false
             private set
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.Default)
     private var monitorJob: Job? = null
-    private var lastBatteryLevel = -1
     private var hasAlertedLowBattery = false
     private var hasAlertedFullCharge = false
     private var lastSoftwareUpdateText: String? = null
@@ -56,8 +49,14 @@ class ProactiveMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        startForeground(NOTIFICATION_ID, buildForegroundNotification())
-        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        ContextCompat.registerReceiver(
+            this,
+            batteryReceiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        startPeriodicAuditor()
+    }
         startPeriodicAuditor()
     }
 
@@ -116,27 +115,6 @@ class ProactiveMonitorService : Service() {
         } catch (e: Exception) {
             // Server offline or sleeping
         }
-    }
-
-    private fun buildForegroundNotification(): Notification {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "J.A.R.V.I.S. Autonomous Telemetry",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Monitors device health, software updates, and workstation tasks"
-            }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
-        }
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("J.A.R.V.I.S. Core Online")
-            .setContentText("Autonomous telemetry and proactive monitoring active.")
-            .setSmallIcon(R.drawable.arc_reactor_bubble)
-            .setOngoing(true)
-            .build()
     }
 
     override fun onDestroy() {

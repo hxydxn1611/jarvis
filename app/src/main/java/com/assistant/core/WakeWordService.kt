@@ -29,8 +29,6 @@ class WakeWordService : Service() {
 
     companion object {
         private const val TAG = "WakeWordService"
-        private const val CHANNEL_ID = "jarvis_wakeword_channel"
-        private const val NOTIFICATION_ID = 2002
         var isListening = false
             private set
     }
@@ -45,7 +43,6 @@ class WakeWordService : Service() {
         super.onCreate()
         brain = AssistantBrain(this)
         VoiceManager.init(this)
-        startForeground(NOTIFICATION_ID, buildForegroundNotification())
         startAcousticListening()
     }
 
@@ -140,27 +137,6 @@ class WakeWordService : Service() {
                 VoiceManager.speak("At your service, Sir.")
             }
         }
-    }
-
-    private fun buildForegroundNotification(): Notification {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "J.A.R.V.I.S. Acoustic Array",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Hands-free continuous wake-word detector"
-            }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
-        }
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("J.A.R.V.I.S. Listening Array Active")
-            .setContentText("Say 'Hey Jarvis' from anywhere to activate.")
-            .setSmallIcon(R.drawable.arc_reactor_bubble)
-            .setOngoing(true)
-            .build()
     }
 
     override fun onDestroy() {
