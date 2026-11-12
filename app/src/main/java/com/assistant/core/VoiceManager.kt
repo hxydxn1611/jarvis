@@ -71,43 +71,45 @@ object VoiceManager : TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             val voices = tts?.voices
             if (!voices.isNullOrEmpty()) {
-                // Tier 1: British Male voices (e.g. en-gb-x-rjs-local, en-gb-x-gbd, en_gb_m01, #male)
+                val femaleBlacklist = listOf(
+                    "female", "woman", "girl", "gba", "gbc", "gbe", 
+                    "sfa", "sfc", "sfe", "ioa", "ioc", "ioe", 
+                    "_f0", "-f0", "#female", "zira", "eva", "victoria"
+                )
+
+                val maleWhitelist = listOf(
+                    "rjs", "gbb", "gbd", "sfb", "sfd", "iom", "iol",
+                    "male", "man", "#male", "_m0", "-m0", "voice 2", "voice 4"
+                )
+
+                // 1. UK Male Voice (Highest Priority - True British Jarvis)
                 val ukMale = voices.firstOrNull { voice ->
+                    val name = voice.name.lowercase()
                     val isUk = voice.locale.country.equals("GB", ignoreCase = true) || 
-                               voice.locale.language.equals("en", ignoreCase = true)
-                    val name = voice.name.lowercase()
-                    val isExplicitlyMale = (name.contains("male") || name.contains("rjs") || 
-                                           name.contains("gbd") || name.contains("gba") || 
-                                           name.contains("gbb") || name.contains("_m0") || 
-                                           name.contains("-m0") || name.contains("voice 2") ||
-                                           name.contains("voice 4") || name.contains("#male")) && 
-                                           !name.contains("female") && !name.contains("_f0") && !name.contains("-f0")
-                    isUk && isExplicitlyMale
+                               name.contains("en-gb") || name.contains("en_gb")
+                    val isMale = maleWhitelist.any { name.contains(it) }
+                    val isNotFemale = femaleBlacklist.none { name.contains(it) }
+                    isUk && isMale && isNotFemale
                 }
 
-                // Tier 2: Any English Male voice
+                // 2. Any English Male Voice (fallback)
                 val anyEnglishMale = voices.firstOrNull { voice ->
-                    val isEnglish = voice.locale.language.equals("en", ignoreCase = true)
                     val name = voice.name.lowercase()
-                    val isExplicitlyMale = (name.contains("male") || name.contains("man") || 
-                                           name.contains("rjs") || name.contains("gbd") || 
-                                           name.contains("sfg") || name.contains("iol") || 
-                                           name.contains("_m0") || name.contains("-m0") ||
-                                           name.contains("voice 2") || name.contains("voice 4") ||
-                                           name.contains("#male")) && 
-                                           !name.contains("female") && !name.contains("_f0") && !name.contains("-f0")
-                    isEnglish && isExplicitlyMale
+                    val isEnglish = voice.locale.language.equals("en", ignoreCase = true)
+                    val isMale = maleWhitelist.any { name.contains(it) }
+                    val isNotFemale = femaleBlacklist.none { name.contains(it) }
+                    isEnglish && isMale && isNotFemale
                 }
 
-                // Tier 3: Non-female voice fallback
-                val nonFemaleVoice = voices.firstOrNull { voice ->
-                    val isEnglish = voice.locale.language.equals("en", ignoreCase = true)
+                // 3. Fallback: Any voice strictly NOT on the female blacklist
+                val nonFemaleUk = voices.firstOrNull { voice ->
                     val name = voice.name.lowercase()
-                    isEnglish && !name.contains("female") && !name.contains("woman") && 
-                                !name.contains("_f0") && !name.contains("-f0") && !name.contains("zira")
+                    val isUk = voice.locale.country.equals("GB", ignoreCase = true) || name.contains("en-gb")
+                    val isNotFemale = femaleBlacklist.none { name.contains(it) }
+                    isUk && isNotFemale
                 }
 
-                val selectedVoice = ukMale ?: anyEnglishMale ?: nonFemaleVoice
+                val selectedVoice = ukMale ?: anyEnglishMale ?: nonFemaleUk
                 if (selectedVoice != null) {
                     tts?.voice = selectedVoice
                     Log.i(TAG, "Selected Male TTS Voice: ${selectedVoice.name} (${selectedVoice.locale})")
@@ -115,9 +117,9 @@ object VoiceManager : TextToSpeech.OnInitListener {
             }
         }
 
-        // Deep baritone British pitch (0.72f) and natural speech tempo
-        tts?.setPitch(0.72f)
-        tts?.setSpeechRate(1.00f)
+        // Deep baritone British pitch (0.70f) and natural speech tempo
+        tts?.setPitch(0.70f)
+        tts?.setSpeechRate(0.98f)
     }
 
     private fun setupUtteranceListener() {
@@ -169,6 +171,9 @@ object VoiceManager : TextToSpeech.OnInitListener {
         if (!isTtsReady || sentence.isBlank()) return
         val clean = sentence.trim()
 
+        tts?.setPitch(0.70f)
+        tts?.setSpeechRate(0.98f)
+
         val utteranceId = "STREAM_${System.currentTimeMillis()}_${clean.hashCode()}"
         if (!hasStartedSpeakingCurrentTurn) {
             // First chunk: Flush any previous audio and play immediately (<400ms)
@@ -182,6 +187,8 @@ object VoiceManager : TextToSpeech.OnInitListener {
 
     fun speak(text: String, onDone: (() -> Unit)? = null) {
         if (isTtsReady && text.isNotBlank()) {
+            tts?.setPitch(0.70f)
+            tts?.setSpeechRate(0.98f)
             val utteranceId = "UTTER_${System.currentTimeMillis()}"
             if (onDone != null) {
                 speechCallbacks[utteranceId] = onDone

@@ -204,6 +204,15 @@ class MainActivity : AppCompatActivity() {
         binding.chipCalibrateVoice.setOnClickListener {
             startVoiceCalibration()
         }
+        binding.chipVoiceTts.setOnClickListener {
+            try {
+                startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+            } catch (e: Exception) {
+                try {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                } catch (e2: Exception) {}
+            }
+        }
         binding.chipDiagnostics.setOnClickListener {
             executeDiagnosticsProtocol()
         }
