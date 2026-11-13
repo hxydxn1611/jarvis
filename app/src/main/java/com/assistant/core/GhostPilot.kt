@@ -34,14 +34,27 @@ object GhostPilot {
         scope.launch {
             try {
                 val deviceManager = DeviceManager(service)
-                val cleanDigits = targetContactOrNumber.replace(Regex("[^0-9+]"), "")
+                var phone = targetContactOrNumber.replace(Regex("[^0-9+]"), "")
                 
-                // If number is already valid international digits or local
-                val formattedPhone = if (cleanDigits.length >= 10) cleanDigits else ""
+                // If not numeric or too short, resolve from device contacts book
+                if (phone.length < 10) {
+                    val lookedUp = deviceManager.lookupContactNumber(targetContactOrNumber)
+                    if (!lookedUp.isNullOrBlank()) {
+                        phone = lookedUp.replace(Regex("[^0-9+]"), "")
+                    }
+                }
 
-                if (formattedPhone.isNotBlank()) {
+                // If 10 digits without country code, default to international format (+91 for India)
+                if (phone.length == 10 && !phone.startsWith("91")) {
+                    phone = "91$phone"
+                }
+                if (phone.startsWith("+")) {
+                    phone = phone.removePrefix("+")
+                }
+
+                if (phone.length >= 10) {
                     val encoded = URLEncoder.encode(message, "UTF-8")
-                    val uri = Uri.parse("https://api.whatsapp.com/send?phone=$formattedPhone&text=$encoded")
+                    val uri = Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$encoded")
                     val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         setPackage("com.whatsapp")
@@ -85,6 +98,62 @@ object GhostPilot {
             } catch (e: Exception) {
                 Log.e(TAG, "Ghost pilot failed to send WhatsApp", e)
                 onComplete(false, "WhatsApp automation encountered an anomaly: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Universal WhatsApp Dispatcher: works from any Context even without Accessibility
+     */
+    fun sendWhatsApp(
+        context: Context,
+        targetContactOrNumber: String,
+        message: String,
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        val service = AssistantAccessibilityService.instance
+        if (service != null) {
+            sendWhatsApp(service, targetContactOrNumber, message) { success, msg ->
+                onComplete?.invoke(success, msg)
+            }
+        } else {
+            try {
+                val dm = DeviceManager(context)
+                var phone = targetContactOrNumber.replace(Regex("[^0-9+]"), "")
+                if (phone.length < 10) {
+                    val lookedUp = dm.lookupContactNumber(targetContactOrNumber)
+                    if (!lookedUp.isNullOrBlank()) {
+                        phone = lookedUp.replace(Regex("[^0-9+]"), "")
+                    }
+                }
+                if (phone.length == 10 && !phone.startsWith("91")) {
+                    phone = "91$phone"
+                }
+                if (phone.startsWith("+")) {
+                    phone = phone.removePrefix("+")
+                }
+
+                if (phone.length >= 10) {
+                    val encoded = URLEncoder.encode(message, "UTF-8")
+                    val uri = Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$encoded")
+                    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        setPackage("com.whatsapp")
+                    }
+                    context.startActivity(intent)
+                    onComplete?.invoke(true, "WhatsApp chat opened for $targetContactOrNumber with message queued, Sir.")
+                } else {
+                    val launchIntent = context.packageManager.getLaunchIntentForPackage("com.whatsapp")
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(launchIntent)
+                        onComplete?.invoke(true, "Opening WhatsApp for $targetContactOrNumber, Sir.")
+                    } else {
+                        onComplete?.invoke(false, "WhatsApp is not installed on this device, Sir.")
+                    }
+                }
+            } catch (e: Exception) {
+                onComplete?.invoke(false, "Could not open WhatsApp: ${e.message}")
             }
         }
     }

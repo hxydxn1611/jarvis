@@ -60,8 +60,11 @@ class MainActivity : AppCompatActivity() {
         Manifest.permission.CAMERA,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.READ_CONTACTS,
+        Manifest.permission.WRITE_CONTACTS,
         Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.SEND_SMS,
+        Manifest.permission.READ_SMS
     )
 
     private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
@@ -93,6 +96,7 @@ class MainActivity : AppCompatActivity() {
 
         brain = AssistantBrain(this)
         VoiceManager.init(this)
+        SmartTvManager.scanLocalNetwork(this)
 
         startCoreAnimation()
         setupInteractions()
@@ -151,7 +155,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestRuntimePermissionsIfNeeded() {
-        val missing = requiredPermissions.filter {
+        val perms = requiredPermissions.toMutableList()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        val missing = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
@@ -215,6 +227,9 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(Settings.ACTION_SETTINGS))
                 } catch (e2: Exception) {}
             }
+        }
+        binding.chipSmartTv.setOnClickListener {
+            triggerSmartTvScan()
         }
         binding.chipDiagnostics.setOnClickListener {
             executeDiagnosticsProtocol()
@@ -658,6 +673,61 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
+        // 6. WhatsApp Transmission (Any contact or phone number)
+        val waPatterns = listOf(
+            Regex("""(?:send\s+)?(?:a\s+)?(?:message|msg)\s+(?:on|in)?\s*whatsapp\s+(?:to\s+)?(.+?)\s+(?:saying|that|telling|with message)\s+(.+)""", RegexOption.IGNORE_CASE),
+            Regex("""whatsapp\s+(?:to\s+)?(.+?)\s+(?:saying|that|telling)\s+(.+)""", RegexOption.IGNORE_CASE),
+            Regex("""(?:send\s+)?(?:a\s+)?whatsapp\s+(?:to\s+)?(.+?)\s+(?:saying|that|telling)\s+(.+)""", RegexOption.IGNORE_CASE),
+            Regex("""message\s+(.+?)\s+on\s+whatsapp\s+(?:saying|that)\s+(.+)""", RegexOption.IGNORE_CASE),
+            Regex("""whatsapp\s+([a-zA-Z0-9_+]+)\s+(.+)""", RegexOption.IGNORE_CASE)
+        )
+        for (pat in waPatterns) {
+            val match = pat.find(lower)
+            if (match != null) {
+                val target = match.groupValues[1].trim()
+                val msg = match.groupValues[2].trim()
+                speakAndDisplay("Transmitting WhatsApp message to $target, Sir.")
+                GhostPilot.sendWhatsApp(this, target, msg)
+                return true
+            }
+        }
+
+        // 7. Wireless Smart TV Jump & Casting (DIAL, Samsung Tizen, Roku, DLNA)
+        if (lower.startsWith("cast ") || lower.contains("on tv") || lower.contains("to tv") || lower.startsWith("play on tv")) {
+            var query = lower.removePrefix("cast ").removePrefix("play on tv").removePrefix("play ")
+            query = query.replace("to tv", "").replace("on tv", "").replace("to my tv", "").replace("on my tv", "").trim()
+            val targetIp = SmartTvManager.activeTv?.ip ?: ""
+            val tvName = SmartTvManager.activeTv?.name ?: "Smart TV"
+            speakAndDisplay("Broadcasting '$query' to $tvName, Sir.")
+            SmartTvManager.castToTv(targetIp, query) { success, feedback ->
+                Log.i(TAG, feedback)
+            }
+            return true
+        }
+
+        if (lower.contains("tv volume up") || lower.contains("increase tv volume") || lower.contains("raise tv volume")) {
+            val tvIp = SmartTvManager.activeTv?.ip ?: ""
+            SmartTvManager.sendTvKey(tvIp, "VOL_UP") { _, msg -> speakAndDisplay(msg) }
+            return true
+        }
+
+        if (lower.contains("tv volume down") || lower.contains("decrease tv volume") || lower.contains("lower tv volume")) {
+            val tvIp = SmartTvManager.activeTv?.ip ?: ""
+            SmartTvManager.sendTvKey(tvIp, "VOL_DOWN") { _, msg -> speakAndDisplay(msg) }
+            return true
+        }
+
+        if (lower.contains("mute tv")) {
+            val tvIp = SmartTvManager.activeTv?.ip ?: ""
+            SmartTvManager.sendTvKey(tvIp, "MUTE") { _, msg -> speakAndDisplay(msg) }
+            return true
+        }
+
+        if (lower.contains("scan wifi") || lower.contains("scan network") || lower.contains("find tv") || lower.contains("find my tv")) {
+            triggerSmartTvScan()
+            return true
+        }
+
         return false
     }
 
@@ -770,6 +840,28 @@ class MainActivity : AppCompatActivity() {
                 ActionType.PLAY_YOUTUBE, ActionType.PLAY_SPOTIFY -> {
                     action.target?.let { GhostPilot.playYouTube(this, it) }
                 }
+                ActionType.SEND_WHATSAPP -> {
+                    action.target?.let { target ->
+                        GhostPilot.sendWhatsApp(this, target, action.value ?: "")
+                    }
+                }
+                ActionType.CAST_TO_TV -> {
+                    val query = action.target ?: "Trending"
+                    val targetIp = action.value ?: SmartTvManager.activeTv?.ip ?: ""
+                    SmartTvManager.castToTv(targetIp, query) { _, msg ->
+                        speakAndDisplay(msg)
+                    }
+                }
+                ActionType.CONTROL_TV -> {
+                    val cmd = action.value ?: "VOL_UP"
+                    val targetIp = SmartTvManager.activeTv?.ip ?: ""
+                    SmartTvManager.sendTvKey(targetIp, cmd) { _, msg ->
+                        speakAndDisplay(msg)
+                    }
+                }
+                ActionType.SCAN_WIFI -> {
+                    triggerSmartTvScan()
+                }
                 ActionType.SET_ALARM -> {
                     val hour = action.target?.toIntOrNull() ?: 7
                     val min = action.value?.toIntOrNull() ?: 0
@@ -779,6 +871,28 @@ class MainActivity : AppCompatActivity() {
                     // Actions requiring Accessibility (screen clicking, typing, scrolling)
                     AssistantAccessibilityService.instance?.executeActions(listOf(action))
                 }
+            }
+        }
+    }
+
+    private fun triggerSmartTvScan() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+        binding.tvCoreState.text = "SCANNING WIFI MESH..."
+        binding.tvTranscript.text = "Jarvis: Scanning local WiFi mesh for Smart TVs and DLNA displays..."
+
+        val (ssid, ip) = SmartTvManager.getWifiInfo(this)
+        SmartTvManager.scanLocalNetwork(this) { tvs ->
+            val count = tvs.size
+            val rep = if (count > 0) {
+                val listStr = tvs.joinToString("\n") { "• ${it.name} [${it.ip}] (${it.protocol})" }
+                "Jarvis: Wireless mesh active on SSID '$ssid' ($ip).\nDiscovered $count Smart TV device(s):\n$listStr\n\nYou can say 'Cast [video] to TV' or 'Turn up TV volume'."
+            } else {
+                "Jarvis: Wireless mesh active on SSID '$ssid' ($ip).\nNo Smart TVs detected via SSDP/DIAL on this subnet. Ensure your TV is powered on and connected to '$ssid'."
+            }
+            speakAndDisplay(if (count > 0) "Wireless mesh established with $count Smart TV device(s), Sir." else "WiFi scan complete. No active Smart TVs detected on $ssid, Sir.")
+            runOnUiThread {
+                binding.tvTranscript.text = rep
             }
         }
     }
@@ -793,6 +907,8 @@ class MainActivity : AppCompatActivity() {
         val time = dm.getFormattedSystemTime()
         val hasAccess = AssistantAccessibilityService.isRunning
         val hasHandsFree = isHandsFreeEnabled
+        val (wifiSsid, localIp) = SmartTvManager.getWifiInfo(this)
+        val tvStatus = SmartTvManager.activeTv?.let { "${it.name} (${it.ip})" } ?: "NO TV LOCKED"
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         val bridgeUrl = prefs.getString("bridge_url", "") ?: ""
         val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank() || AssistantBrain.BUNDLED_API_KEY.isNotBlank()
@@ -802,6 +918,8 @@ class MainActivity : AppCompatActivity() {
             .append("---------------------------------\n")
             .append("• Time: $time\n")
             .append("• Arc Power (Battery): $battery%\n")
+            .append("• WiFi Mesh: $wifiSsid (IP: $localIp)\n")
+            .append("• Smart TV Telemetry: $tvStatus\n")
             .append("• Neural Super-Brain: ").append(if (hasKey) "ONLINE (Gemini)" else "LOCAL ONLY").append("\n")
             .append("• Tactical Accessibility: ").append(if (hasAccess) "ARMED" else "UNAUTHORIZED").append("\n")
             .append("• Acoustic Wake Array: ").append(if (hasHandsFree) "ONLINE" else "DISARMED").append("\n")

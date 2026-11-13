@@ -24,6 +24,9 @@ enum class ActionType {
     TOGGLE_SENTRY_MODE,
     INSPECT_SCREEN,
     MORNING_BRIEFING,
+    CAST_TO_TV,
+    CONTROL_TV,
+    SCAN_WIFI,
     SPEAK
 }
 

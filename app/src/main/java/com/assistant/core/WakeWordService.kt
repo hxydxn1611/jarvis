@@ -247,6 +247,17 @@ class WakeWordService : Service() {
                                 ActionType.FLASHLIGHT_TOGGLE -> dm.toggleTorch(action.value != "false")
                                 ActionType.CALL_PHONE -> action.target?.let { dm.makeCall(it) }
                                 ActionType.PLAY_YOUTUBE, ActionType.PLAY_SPOTIFY -> action.target?.let { GhostPilot.playYouTube(this@WakeWordService, it) }
+                                ActionType.SEND_WHATSAPP -> action.target?.let { GhostPilot.sendWhatsApp(this@WakeWordService, it, action.value ?: "") }
+                                ActionType.CAST_TO_TV -> {
+                                    val query = action.target ?: "Trending"
+                                    val targetIp = action.value ?: SmartTvManager.activeTv?.ip ?: ""
+                                    SmartTvManager.castToTv(targetIp, query) { _, _ -> }
+                                }
+                                ActionType.CONTROL_TV -> {
+                                    val cmd = action.value ?: "VOL_UP"
+                                    val targetIp = SmartTvManager.activeTv?.ip ?: ""
+                                    SmartTvManager.sendTvKey(targetIp, cmd) { _, _ -> }
+                                }
                                 ActionType.OPEN_APP -> {
                                     val pkg = action.target
                                     if (pkg != null) {
