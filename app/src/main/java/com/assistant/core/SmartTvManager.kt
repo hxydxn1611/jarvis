@@ -246,7 +246,9 @@ object SmartTvManager {
                     if (response.contains("LOCATION:", ignoreCase = true) ||
                         response.contains("Samsung", ignoreCase = true) ||
                         response.contains("dial", ignoreCase = true) ||
-                        response.contains("MediaRenderer", ignoreCase = true)
+                        response.contains("MediaRenderer", ignoreCase = true) ||
+                        response.contains("InternetGatewayDevice", ignoreCase = true) ||
+                        response.contains("schemas-upnp-org", ignoreCase = true)
                     ) {
                         val location = response.lines()
                             .firstOrNull { it.startsWith("LOCATION:", ignoreCase = true) }
@@ -293,10 +295,14 @@ object SmartTvManager {
                     if (nameMatch != null) {
                         return nameMatch.groupValues[1].trim()
                     }
+                    val modelMatch = Regex("<modelName>(.+?)</modelName>", RegexOption.IGNORE_CASE).find(body)
+                    if (modelMatch != null) {
+                        return modelMatch.groupValues[1].trim()
+                    }
                 }
             } catch (e: Exception) {}
         }
-        return "Smart TV ($ip)"
+        return "Smart Device ($ip)"
     }
 
     /**

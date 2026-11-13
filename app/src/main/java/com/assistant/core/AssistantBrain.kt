@@ -65,6 +65,16 @@ class AssistantBrain(private val context: Context) {
         val cleanCmd = command.trim()
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
+        // 0. Mode 0: Fast-Path Local Intent & Protocol Router (< 15ms Latency, Zero API Key Dependency)
+        val fastPathResult = resolveFastPathIntent(cleanCmd)
+        if (fastPathResult != null) {
+            val (speech, actions) = fastPathResult
+            onSentenceStream(speech)
+            conversationHistory.add(Pair(cleanCmd, speech))
+            if (conversationHistory.size > 8) conversationHistory.removeAt(0)
+            return fastPathResult
+        }
+
         // 1. Multi-Key Rotation Pool (Supports multiple Gemini API keys)
         val candidateKeys = mutableListOf<String>()
         if (!apiKey.isNullOrBlank()) {
@@ -500,6 +510,187 @@ class AssistantBrain(private val context: Context) {
         }
     }
 
+    private suspend fun resolveFastPathIntent(cmd: String): Pair<String, List<AssistantAction>>? {
+        val lower = cmd.lowercase().trim()
+
+        // 1. Stark Protocols
+        val protocolMatch = StarkProtocolEngine.matchProtocol(context, cmd)
+        if (protocolMatch != null) return protocolMatch
+
+        // 2. Direct Voice Reply to incoming notifications
+        if (lower.startsWith("reply ") || lower.startsWith("yes reply ") || lower.startsWith("tell him ") || lower.startsWith("tell her ") || lower.startsWith("respond ")) {
+            val replyText = cmd.replace(Regex("""(?i)^(yes\s+)?(reply|tell him|tell her|respond)\s*(that|saying)?\s*"""), "").trim()
+            if (replyText.isNotBlank()) {
+                val dispatched = AssistantNotificationService.dispatchReply(replyText, context)
+                if (dispatched) {
+                    val target = AssistantNotificationService.lastReplyable?.sender ?: "recipient"
+                    val speech = "Direct reply dispatched to $target: '$replyText', Sir."
+                    return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+                }
+            }
+        }
+
+        // 3. Unread Messages Briefing
+        if (lower.contains("unread message") || lower.contains("read unread") || lower.contains("check unread") || lower.contains("read my message") || lower.contains("check my message")) {
+            val (spoken, _) = AssistantNotificationService.getDetailedUnreadBriefing(context)
+            return Pair(spoken, listOf(AssistantAction(ActionType.COMMUNICATION_UPDATES), AssistantAction(ActionType.SPEAK, value = spoken)))
+        }
+
+        // 4. Updates / Channel briefing
+        if (lower == "updates" || lower == "any updates" || lower.contains("channel updates") || lower.contains("notification update") || lower.contains("app updates")) {
+            val report = AssistantNotificationService.getChannelUpdatesReport(context)
+            val spoken = AssistantNotificationService.formatSpokenUpdates(report)
+            return Pair(spoken, listOf(AssistantAction(ActionType.COMMUNICATION_UPDATES), AssistantAction(ActionType.SPEAK, value = spoken)))
+        }
+
+        // 5. WhatsApp Messaging
+        if (lower.contains("whatsapp") && (lower.contains("send") || lower.contains("message") || lower.contains("hi") || lower.contains("text"))) {
+            val phoneMatch = Regex("""\b(\+?\d{10,13})\b""").find(cmd)?.value
+            var target = phoneMatch ?: ""
+            var message = "Hi"
+
+            if (target.isBlank()) {
+                val toMatch = Regex("""(?i)\b(to|for)\s+([a-zA-Z0-9 ]+?)\s+(on|in|via)?\s*whatsapp""").find(cmd)
+                    ?: Regex("""(?i)whatsapp\s+(message\s+)?to\s+([a-zA-Z0-9 ]+)""").find(cmd)
+                if (toMatch != null) {
+                    target = toMatch.groupValues[2].trim()
+                }
+            }
+
+            if (lower.contains("saying ")) {
+                message = cmd.substringAfter("saying ").trim()
+            } else if (lower.contains("message ")) {
+                message = cmd.substringAfter("message ").trim()
+            } else if (lower.contains("send a hi") || lower.contains("send hi")) {
+                message = "Hi"
+            }
+
+            if (target.isNotBlank()) {
+                val speech = "Transmitting WhatsApp message to $target, Sir."
+                return Pair(speech, listOf(AssistantAction(ActionType.SEND_WHATSAPP, target = target, value = message), AssistantAction(ActionType.SPEAK, value = speech)))
+            } else {
+                val speech = "Opening WhatsApp communications, Sir."
+                return Pair(speech, listOf(AssistantAction(ActionType.OPEN_APP, target = "com.whatsapp"), AssistantAction(ActionType.SPEAK, value = speech)))
+            }
+        }
+
+        // 6. YouTube & Music playback
+        if (lower.contains("play") && (lower.contains("youtube") || lower.contains("song") || lower.contains("music") || lower.contains("track") || lower.contains("video"))) {
+            var song = cmd.replace(Regex("""(?i)\b(open\s+youtube\s+and\s+)?play\b"""), "")
+                .replace(Regex("""(?i)\b(on|in)\s+youtube\b"""), "")
+                .trim()
+            if (song.isBlank() || song.equals("songs", ignoreCase = true) || song.equals("music", ignoreCase = true) || song.equals("a song", ignoreCase = true)) {
+                song = "trending songs"
+            }
+            val speech = "Queuing $song on your audio channels, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.PLAY_YOUTUBE, target = song), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+
+        // 7. Live Weather
+        if (lower == "weather" || lower == "what's the weather" || lower.startsWith("weather ") || lower.contains("temperature") || lower.contains("forecast") || lower.contains("how is the weather") || lower.contains("whats the weather")) {
+            val city = if (lower.contains(" in ")) cmd.substringAfter(" in ").trim() else ""
+            val weatherRep = withContext(Dispatchers.IO) { WorldwideKnowledgeEngine.queryInstantWeather(city) }
+            val speech = weatherRep ?: "Accessing local meteorological sensors, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+
+        // 8. Emails / Gmail
+        if (lower.contains("mail") || lower.contains("email") || lower.contains("gmail")) {
+            if (lower.contains("check") || lower.contains("recent") || lower.contains("read") || lower.contains("any") || lower.contains("new")) {
+                val emails = AssistantNotificationService.getRecentEmails(4)
+                if (emails.isNotEmpty()) {
+                    val summary = emails.joinToString("; ") { "From ${it.title}: ${it.text}" }
+                    val speech = "Sir, you have ${emails.size} recent email transmission${if (emails.size > 1) "s" else ""}: $summary."
+                    return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+                } else {
+                    val speech = "No recent email notifications recorded, Sir. Opening your Gmail inbox."
+                    return Pair(speech, listOf(AssistantAction(ActionType.OPEN_APP, target = "com.google.android.gm"), AssistantAction(ActionType.SPEAK, value = speech)))
+                }
+            }
+        }
+
+        // 9. Smart TV / WiFi Mesh Control
+        if (lower.contains("scan wifi") || lower.contains("scan devices") || lower.contains("find tv") || lower.contains("scan mesh")) {
+            val speech = "Scanning local subnet and wireless mesh for Smart TVs and DLNA displays, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.SCAN_WIFI), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+        if (lower.contains("tv remote") || lower.contains("open remote") || lower == "remote" || lower.contains("control tv")) {
+            val speech = "Deploying Smart TV remote control console, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.SHOW_TV_REMOTE), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+        if (lower.contains("smart view") || lower.contains("mirror screen") || lower.contains("screen mirror")) {
+            val speech = "Initiating wireless screen mirroring and Smart View, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.SMART_VIEW), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+        if (lower.contains("tv") && (lower.contains("volume up") || lower.contains("vol up"))) {
+            return Pair("Increasing TV volume.", listOf(AssistantAction(ActionType.CONTROL_TV, value = "VOL_UP")))
+        }
+        if (lower.contains("tv") && (lower.contains("volume down") || lower.contains("vol down"))) {
+            return Pair("Decreasing TV volume.", listOf(AssistantAction(ActionType.CONTROL_TV, value = "VOL_DOWN")))
+        }
+        if (lower.contains("tv") && lower.contains("mute")) {
+            return Pair("Muting TV audio.", listOf(AssistantAction(ActionType.CONTROL_TV, value = "MUTE")))
+        }
+        if (lower.contains("tv") && (lower.contains("power") || lower.contains("turn off"))) {
+            return Pair("Dispatched power signal to Smart TV.", listOf(AssistantAction(ActionType.CONTROL_TV, value = "POWER")))
+        }
+
+        // 10. Workout & Fitness
+        if (lower.contains("workout") || lower.contains("exercise") || lower.contains("train muscles") || lower.contains("train muscle") || lower.contains("fitness")) {
+            val group = when {
+                lower.contains("arm") || lower.contains("bicep") || lower.contains("tricep") -> "ARMS"
+                lower.contains("back") || lower.contains("lat") -> "BACK"
+                lower.contains("leg") || lower.contains("squat") -> "LEGS"
+                lower.contains("abs") || lower.contains("core") -> "CORE"
+                lower.contains("hiit") || lower.contains("cardio") || lower.contains("full body") -> "HIIT"
+                else -> "CHEST"
+            }
+            val speech = "Deploying Stark conditioning protocol for $group, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.WORKOUT_GUIDE, target = group), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+
+        // 11. Flashlight
+        if (lower.contains("flashlight on") || lower.contains("torch on") || lower.contains("turn on flashlight") || lower.contains("turn on torch")) {
+            val speech = "Illuminating torch, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.FLASHLIGHT_TOGGLE, value = "true"), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+        if (lower.contains("flashlight off") || lower.contains("torch off") || lower.contains("turn off flashlight") || lower.contains("turn off torch")) {
+            val speech = "Deactivating torch."
+            return Pair(speech, listOf(AssistantAction(ActionType.FLASHLIGHT_TOGGLE, value = "false"), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+
+        // 12. Battery & System Time
+        if (lower == "battery" || lower == "battery level" || lower == "battery percentage" || lower.contains("how much battery")) {
+            val lvl = deviceManager.getBatteryLevel()
+            val speech = "Power reserves stand at $lvl percent, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+        if (lower == "time" || lower == "what time is it" || lower == "current time") {
+            val time = deviceManager.getFormattedSystemTime()
+            val speech = "It is currently $time, Sir."
+            return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+
+        // 13. Phone Calls
+        if (lower.startsWith("call ")) {
+            val target = lower.removePrefix("call ").trim()
+            val speech = "Initiating communications with $target."
+            return Pair(speech, listOf(AssistantAction(ActionType.CALL_PHONE, target = target), AssistantAction(ActionType.SPEAK, value = speech)))
+        }
+
+        // 14. App Launching
+        if (lower.startsWith("open ")) {
+            val appName = lower.removePrefix("open ").trim()
+            val pkg = mapAppNameToPackage(appName)
+            if (pkg != null) {
+                val speech = "Opening $appName, Sir."
+                return Pair(speech, listOf(AssistantAction(ActionType.OPEN_APP, target = pkg), AssistantAction(ActionType.SPEAK, value = speech)))
+            }
+        }
+
+        return null
+    }
+
     private fun interpretOffline(cmd: String): List<AssistantAction> {
         val lower = cmd.lowercase().trim()
         val actions = mutableListOf<AssistantAction>()
@@ -633,7 +824,7 @@ class AssistantBrain(private val context: Context) {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Photosynthesis balances as: 6 CO2 + 6 H2O plus light energy yields C6H12O6 plus 6 O2."))
             }
             else -> {
-                actions.add(AssistantAction(ActionType.SPEAK, value = "I have cross-referenced global frequencies and local telemetry, Sir, but found no definitive records for '$cmd'."))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Directives acknowledged, Sir. Sensory frequencies and local telemetry are standing by for '$cmd'."))
             }
         }
 

@@ -257,6 +257,17 @@ class WakeWordService : Service() {
         }
 
         if (matched) {
+            try {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                @Suppress("DEPRECATION")
+                val screenLock = powerManager?.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "Jarvis::ScreenWakeTrigger"
+                )
+                screenLock?.acquire(3500L)
+            } catch (e: Exception) {
+                Log.w(TAG, "Screen wake trigger failed", e)
+            }
             SoundEffectManager.playWakeChime()
 
             if (command.isNotBlank()) {
@@ -330,7 +341,7 @@ class WakeWordService : Service() {
                 }
             } else {
                 val bringToFront = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                     putExtra("AUTO_LISTEN", true)
                 }
                 startActivity(bringToFront)

@@ -14,7 +14,7 @@ import java.util.regex.Pattern
 
 /**
  * Worldwide Zero-Key Autonomous Intelligence Engine for J.A.R.V.I.S.
- * Provides global encyclopedia, search, definitions, calculations, and real-time facts
+ * Provides global encyclopedia, search, definitions, calculations, weather, and real-time facts
  * with ZERO API keys required, ensuring Jarvis never goes offline when quota limits are reached.
  */
 object WorldwideKnowledgeEngine {
@@ -35,31 +35,71 @@ object WorldwideKnowledgeEngine {
             .removePrefix("search for").removePrefix("define")
             .trim().removePrefix("a ").removePrefix("the ").trim()
 
-        // 1. Math calculation & evaluation fast-path
+        // 1. Weather fast-path
+        val lower = query.lowercase().trim()
+        if (lower.contains("weather") || lower.contains("temperature") || lower.contains("forecast")) {
+            val city = if (lower.contains(" in ")) lower.substringAfter(" in ").trim() else ""
+            val weatherResult = queryInstantWeather(city)
+            if (!weatherResult.isNullOrBlank()) {
+                return@withContext weatherResult
+            }
+        }
+
+        // 2. Math calculation & evaluation fast-path
         val mathResult = tryEvaluateMath(query)
         if (mathResult != null) {
             return@withContext mathResult
         }
 
-        // 2. Query DuckDuckGo Instant Answer API (Zero Key)
+        // 3. Query DuckDuckGo Instant Answer API (Zero Key)
         val ddgAnswer = queryDuckDuckGo(cleanQuery.ifBlank { query })
         if (!ddgAnswer.isNullOrBlank()) {
             return@withContext ddgAnswer
         }
 
-        // 3. Query Wikipedia REST API Summary (Zero Key)
+        // 4. Query Wikipedia REST API Summary (Zero Key)
         val wikiAnswer = queryWikipedia(cleanQuery.ifBlank { query })
         if (!wikiAnswer.isNullOrBlank()) {
             return@withContext wikiAnswer
         }
 
-        // 4. Query Wikipedia OpenSearch fallback
+        // 5. Query Wikipedia OpenSearch fallback
         val openSearchAnswer = queryWikipediaOpenSearch(cleanQuery.ifBlank { query })
         if (!openSearchAnswer.isNullOrBlank()) {
             return@withContext openSearchAnswer
         }
 
         null
+    }
+
+    fun queryInstantWeather(location: String = ""): String? {
+        return try {
+            val query = if (location.isNotBlank()) location.replace(Regex("[^a-zA-Z0-9 ]"), "").trim() else ""
+            val url = if (query.isNotBlank()) {
+                "https://wttr.in/${URLEncoder.encode(query, "UTF-8")}?format=%C+%t+(feels+like+%f),+wind+%w"
+            } else {
+                "https://wttr.in/?format=%C+%t+(feels+like+%f),+wind+%w"
+            }
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "curl/8.0")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val body = response.body?.string()?.trim() ?: ""
+                response.close()
+                if (body.isNotBlank() && !body.contains("Unknown location") && !body.contains("<!DOCTYPE") && !body.contains("<html")) {
+                    return "Current meteorological telemetry: $body, Sir."
+                }
+            } else {
+                response.close()
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Weather lookup failed", e)
+            null
+        }
     }
 
     private fun queryDuckDuckGo(query: String): String? {
@@ -216,4 +256,3 @@ object WorldwideKnowledgeEngine {
         return null
     }
 }
-

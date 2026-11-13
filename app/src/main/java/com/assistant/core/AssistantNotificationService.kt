@@ -2,6 +2,8 @@ package com.assistant.core
 
 import android.app.Notification
 import android.content.Context
+import android.content.Intent
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -30,6 +32,16 @@ data class ChannelUpdatesReport(
     val recentAlerts: List<NotificationItem>
 )
 
+data class ReplyableNotification(
+    val key: String,
+    val packageName: String,
+    val sender: String,
+    val text: String,
+    val action: Notification.Action,
+    val remoteInput: android.app.RemoteInput,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 class AssistantNotificationService : NotificationListenerService() {
 
     companion object {
@@ -38,6 +50,8 @@ class AssistantNotificationService : NotificationListenerService() {
             private set
 
         private val recentNotifications = mutableListOf<NotificationItem>()
+        var lastReplyable: ReplyableNotification? = null
+            private set
 
         fun getRecent(limit: Int = 6): List<NotificationItem> {
             synchronized(recentNotifications) {
@@ -55,6 +69,92 @@ class AssistantNotificationService : NotificationListenerService() {
             synchronized(recentNotifications) {
                 return recentNotifications.firstOrNull { it.isSystemAlert }
             }
+        }
+
+        fun dispatchReply(replyText: String, context: Context): Boolean {
+            val target = lastReplyable ?: return false
+            return try {
+                val intent = Intent()
+                val bundle = Bundle()
+                bundle.putCharSequence(target.remoteInput.resultKey, replyText)
+                android.app.RemoteInput.addResultsToIntent(arrayOf(target.remoteInput), intent, bundle)
+                target.action.actionIntent.send(context, 0, intent)
+                Log.i(TAG, "Dispatched autonomous RemoteInput reply to ${target.sender}")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to dispatch RemoteInput reply", e)
+                false
+            }
+        }
+
+        fun getDetailedUnreadBriefing(context: Context): Pair<String, String> {
+            val active = try { instance?.activeNotifications } catch (e: Exception) { null }
+            val messages = mutableListOf<NotificationItem>()
+
+            if (active != null && active.isNotEmpty()) {
+                for (sbn in active) {
+                    if (sbn.isOngoing) continue
+                    val pkg = sbn.packageName.lowercase()
+                    val title = sbn.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+                    val text = sbn.notification?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+                    if (title.isBlank() && text.isBlank()) continue
+
+                    val isWa = pkg.contains("whatsapp")
+                    val isSms = pkg.contains("messaging") || pkg.contains("mms")
+                    val isMail = pkg == "com.google.android.gm" || pkg.contains("mail")
+                    val isInsta = pkg.contains("instagram")
+                    val isSnap = pkg.contains("snapchat")
+
+                    if (isWa || isSms || isMail || isInsta || isSnap) {
+                        messages.add(
+                            NotificationItem(
+                                packageName = pkg,
+                                title = title,
+                                text = text,
+                                isWhatsApp = isWa,
+                                isSms = isSms,
+                                isEmail = isMail,
+                                isInstagram = isInsta,
+                                isSnapchat = isSnap
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (messages.isEmpty()) {
+                synchronized(recentNotifications) {
+                    messages.addAll(recentNotifications.filter { it.isWhatsApp || it.isSms || it.isEmail }.takeLast(5))
+                }
+            }
+
+            if (messages.isEmpty()) {
+                val spoken = "You have no unread transmissions at this time, Sir. All communication channels are clear."
+                val transcript = "STARK TELEMETRY // COMMUNICATIONS BRIEFING\nAll channels clear. No unread messages."
+                return Pair(spoken, transcript)
+            }
+
+            val spokenParts = mutableListOf<String>()
+            val transcriptSb = StringBuilder("STARK TELEMETRY // UNREAD TRANSMISSIONS\n-----------------------------------------\n")
+
+            for ((index, item) in messages.take(4).withIndex()) {
+                val channel = when {
+                    item.isWhatsApp -> "WhatsApp"
+                    item.isSms -> "SMS"
+                    item.isEmail -> "Email"
+                    item.isInstagram -> "Instagram"
+                    item.isSnapchat -> "Snapchat"
+                    else -> "Message"
+                }
+                val sender = if (item.title.isNotBlank()) item.title else "Unknown"
+                val snippet = if (item.text.isNotBlank()) item.text.take(80) else "New transmission"
+                spokenParts.add("${if (index == 0) "First" else "Next"}, on $channel from $sender: '$snippet'")
+                transcriptSb.append("• [$channel] $sender: $snippet\n")
+            }
+
+            val spoken = "Sir, you have ${messages.size} unread transmission${if (messages.size > 1) "s" else ""}. " +
+                    spokenParts.joinToString(". ") + ". Would you like me to dispatch a reply?"
+            return Pair(spoken, transcriptSb.toString())
         }
 
         fun getChannelUpdatesReport(context: Context): ChannelUpdatesReport {
@@ -208,6 +308,28 @@ class AssistantNotificationService : NotificationListenerService() {
                            pkg.contains("fota") ||
                            (pkg == "android" && (combined.contains("update") || combined.contains("firmware") || combined.contains("restart to update")))
 
+            // 5. Look for RemoteInput actions (Direct Voice Reply support for WhatsApp / SMS)
+            var foundReplyable: ReplyableNotification? = null
+            val actions = sbn.notification?.actions
+            if (actions != null) {
+                for (action in actions) {
+                    val remoteInputs = action.remoteInputs
+                    if (remoteInputs != null && remoteInputs.isNotEmpty()) {
+                        val input = remoteInputs.first()
+                        foundReplyable = ReplyableNotification(
+                            key = sbn.key ?: "",
+                            packageName = sbn.packageName,
+                            sender = title,
+                            text = text,
+                            action = action,
+                            remoteInput = input
+                        )
+                        lastReplyable = foundReplyable
+                        break
+                    }
+                }
+            }
+
             val item = NotificationItem(
                 packageName = sbn.packageName,
                 title = title,
@@ -231,6 +353,28 @@ class AssistantNotificationService : NotificationListenerService() {
             // Proactive Jarvis announcement for Samsung system updates
             if (isUpdate) {
                 VoiceManager.speak("Sir, Samsung has dispatched a new software update for your device.")
+                return
+            }
+
+            // Proactive spoken announcements for incoming WhatsApp / SMS / Social notifications
+            if (isWhatsApp || isSms || isInstagram || isSnapchat) {
+                val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+                val proactiveEnabled = prefs.getBoolean("proactive_notif_enabled", true)
+                if (proactiveEnabled && !VoiceManager.isCurrentlySpeaking()) {
+                    val appName = when {
+                        isWhatsApp -> "WhatsApp"
+                        isSms -> "Messages"
+                        isInstagram -> "Instagram"
+                        isSnapchat -> "Snapchat"
+                        else -> "System"
+                    }
+                    val spoken = if (foundReplyable != null) {
+                        "Sir, new message on $appName from $title: '$text'. Would you like me to respond?"
+                    } else {
+                        "Sir, new alert on $appName from $title: '$text'."
+                    }
+                    VoiceManager.speak(spoken)
+                }
             }
         } catch (t: Throwable) {
             Log.e(TAG, "Safe catch onNotificationPosted", t)
