@@ -33,8 +33,8 @@ class AssistantBrain(private val context: Context) {
             }
         }
         val CANDIDATE_MODELS = listOf(
-            "gemini-flash-lite-latest",
             "gemini-2.0-flash",
+            "gemini-flash-lite-latest",
             "gemini-1.5-flash",
             "gemini-2.0-flash-lite",
             "gemini-1.5-flash-latest",
@@ -92,6 +92,12 @@ class AssistantBrain(private val context: Context) {
         val screenContext = visibleText.take(25).joinToString(", ")
         val recentNotifs = AssistantNotificationService.getRecent(4)
             .joinToString("; ") { "${it.title}: ${it.text}" }
+        val recentEmails = AssistantNotificationService.getRecentEmails(4)
+        val emailContext = if (recentEmails.isNotEmpty()) {
+            recentEmails.joinToString("; ") { "From: ${it.title}, Subject: ${it.text}" }
+        } else {
+            "No unread email notifications logged yet"
+        }
 
         val systemUpdateTime = AssistantNotificationService.checkSystemSoftwareUpdate()?.text ?: "None"
         val currentClock = deviceManager.getFormattedSystemTime()
@@ -115,6 +121,7 @@ class AssistantBrain(private val context: Context) {
             - Battery Level: $batteryLvl%
             - WiFi Mesh: $wifiSsid (Local IP: $localIp)
             - Connected Smart TV: $tvStatus
+            - Recent Incoming Emails: [$emailContext]
             - GPS Coordinates: $locationCoords
             - System Update Status: $systemUpdateTime
             - User Knowledge: $userKnowledge
@@ -154,6 +161,7 @@ class AssistantBrain(private val context: Context) {
             - SCROLL_DOWN / SCROLL_UP / GLOBAL_HOME / GLOBAL_BACK / TAKE_SCREENSHOT
             
             SPECIAL BEHAVIORS:
+            - If user asks to check, read, or summarize their emails or mail, inspect 'Recent Incoming Emails'. If emails exist, summarize them clearly (e.g. 'Sir, you have an email from [Sender] regarding [Subject]'). If none are found, announce that no new email alerts have arrived and offer to open Gmail with OPEN_APP (target: com.google.android.gm).
             - If user asks to send WhatsApp message to someone, generate SEND_WHATSAPP action with contact and text.
             - If user asks to play a video on TV, cast to TV, or jump to TV, generate CAST_TO_TV action.
             - If user asks to control TV volume or power, generate CONTROL_TV action.
@@ -200,21 +208,32 @@ class AssistantBrain(private val context: Context) {
             add("contents", contents)
         }
 
+        val lowerCmd = command.lowercase()
+        val needsLiveSearch = lowerCmd.contains("who won") || 
+                              lowerCmd.contains("current score") || 
+                              lowerCmd.contains("stock price") || 
+                              lowerCmd.contains("search web") || 
+                              lowerCmd.contains("search google")
+
+        // Sub-second fast path: Use direct streaming without search overhead by default
+        val primaryBody = if (needsLiveSearch) jsonBodyWithTools else jsonBodyWithoutTools
+        val secondaryBody = if (needsLiveSearch) jsonBodyWithoutTools else jsonBodyWithTools
+
         for (model in CANDIDATE_MODELS) {
             try {
                 val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$effectiveKey&alt=sse"
                 var request = Request.Builder()
                     .url(url)
-                    .post(jsonBodyWithTools.toString().toRequestBody("application/json".toMediaType()))
+                    .post(primaryBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
                 var response = httpClient.newCall(request).execute()
                 if (!response.isSuccessful) {
                     response.close()
-                    // Fallback attempt without search tool
+                    // Fallback attempt with secondary body
                     request = Request.Builder()
                         .url(url)
-                        .post(jsonBodyWithoutTools.toString().toRequestBody("application/json".toMediaType()))
+                        .post(secondaryBody.toString().toRequestBody("application/json".toMediaType()))
                         .build()
                     response = httpClient.newCall(request).execute()
                 }
@@ -236,7 +255,7 @@ class AssistantBrain(private val context: Context) {
                 val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$effectiveKey"
                 var request = Request.Builder()
                     .url(url)
-                    .post(jsonBodyWithTools.toString().toRequestBody("application/json".toMediaType()))
+                    .post(primaryBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
                 var response = httpClient.newCall(request).execute()
@@ -244,7 +263,7 @@ class AssistantBrain(private val context: Context) {
                     response.close()
                     request = Request.Builder()
                         .url(url)
-                        .post(jsonBodyWithoutTools.toString().toRequestBody("application/json".toMediaType()))
+                        .post(secondaryBody.toString().toRequestBody("application/json".toMediaType()))
                         .build()
                     response = httpClient.newCall(request).execute()
                 }
@@ -390,9 +409,13 @@ class AssistantBrain(private val context: Context) {
                                 sentenceBuffer.append(partText)
                                 speechBuilder.append(partText)
 
-                                // Check for sentence boundary: '.', '!', '?', or '\n'
+                                // Check for sentence or clause boundary to stream audio with zero latency
                                 val buf = sentenceBuffer.toString()
-                                val punctIdx = buf.indexOfAny(charArrayOf('.', '!', '?', '\n'))
+                                val punctIdx = if (buf.length >= 16) {
+                                    buf.indexOfAny(charArrayOf('.', '!', '?', '\n', ',', ';', ':'))
+                                } else {
+                                    buf.indexOfAny(charArrayOf('.', '!', '?', '\n'))
+                                }
                                 if (punctIdx != -1) {
                                     val sentence = buf.substring(0, punctIdx + 1).trim()
                                     val remainder = buf.substring(punctIdx + 1)

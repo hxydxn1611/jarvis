@@ -234,11 +234,18 @@ object SmartTvManager {
         val host = parts[3].toIntOrNull() ?: 1
 
         val checkIps = mutableListOf<String>()
-        // Prioritize adjacent IPs and common router/TV leases
-        for (i in 1..40) {
-            if (i != host) checkIps.add("$prefix.$i")
+        // 1. Broad coverage of adjacent host IPs (e.g. phones, TVs on local subnet)
+        for (i in (host - 25).coerceAtLeast(1)..(host + 25).coerceAtMost(254)) {
+            val ip = "$prefix.$i"
+            if (!checkIps.contains(ip)) checkIps.add(ip)
         }
-        for (i in (host - 5).coerceAtLeast(1)..(host + 5).coerceAtMost(254)) {
+        // 2. Common DHCP smart home pool 100..140
+        for (i in 100..140) {
+            val ip = "$prefix.$i"
+            if (!checkIps.contains(ip)) checkIps.add(ip)
+        }
+        // 3. Static/router/hub pool 1..30
+        for (i in 1..30) {
             val ip = "$prefix.$i"
             if (!checkIps.contains(ip)) checkIps.add(ip)
         }
@@ -253,18 +260,18 @@ object SmartTvManager {
     }
 
     private fun probeSingleIpForTv(ip: String): DiscoveredTv? {
-        val ports = listOf(8008, 8001, 8060)
+        val ports = listOf(8008, 8001, 8060, 8009, 8080)
         for (port in ports) {
             try {
                 val socket = Socket()
-                socket.connect(InetSocketAddress(ip, port), 250)
+                socket.connect(InetSocketAddress(ip, port), 220)
                 socket.close()
 
                 // Port is open! Identify protocol
                 return when (port) {
-                    8008 -> {
+                    8008, 8009 -> {
                         val name = resolveDeviceFriendlyName("http://$ip:8008/ssdp/device-desc.xml", ip)
-                        DiscoveredTv(if (name.contains("Smart TV")) "Google / Android TV ($ip)" else name, ip, TvProtocol.DIAL_CAST, 8008)
+                        DiscoveredTv(if (name.contains("Smart TV")) "Google / Android TV ($ip)" else name, ip, TvProtocol.DIAL_CAST, port)
                     }
                     8001 -> {
                         val name = resolveSamsungName(ip)

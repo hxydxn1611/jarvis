@@ -174,7 +174,7 @@ class WakeWordService : Service() {
         if (VoiceManager.isCurrentlySpeaking()) {
             VoiceManager.onTurnComplete {
                 scope.launch {
-                    delay(700)
+                    delay(500)
                     restartRecognizer()
                 }
             }
@@ -182,17 +182,9 @@ class WakeWordService : Service() {
         }
 
         try {
-            speechRecognizer?.cancel()
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                val tag = Locale.getDefault().toLanguageTag()
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            }
-            speechRecognizer?.startListening(intent)
+            startAcousticListening()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start speech recognizer", e)
+            Log.e(TAG, "Failed to restart acoustic listener", e)
         }
     }
 
@@ -204,9 +196,10 @@ class WakeWordService : Service() {
         var command = ""
 
         val wakeRegexes = listOf(
-            Regex("""\b(hey|hi|hello|ok|okay|yo|listen)?\s*(jarvis|jervis|jarves|javis|jarviz|service|harvest|travis|charvis|chavez|gervais)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\b(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
+            Regex("""\b(hey|hi|hello|ok|okay|yo|listen|wake\s+up)?\s*(jarvis|jervis|jarves|javis|jarviz|java|javus|javes|tarvis|starvis|service|harvest|travis|charvis|charles|chavez|gervais)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(jarvis|jervis|jarves|javis|jarviz|java|javus|javes|tarvis|starvis)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bwake\s+up\b""", RegexOption.IGNORE_CASE)
         )
 
         for (candidate in candidates) {

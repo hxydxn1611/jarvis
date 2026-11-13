@@ -10,6 +10,7 @@ data class NotificationItem(
     val title: String,
     val text: String,
     val isSystemAlert: Boolean = false,
+    val isEmail: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -25,6 +26,12 @@ class AssistantNotificationService : NotificationListenerService() {
         fun getRecent(limit: Int = 6): List<NotificationItem> {
             synchronized(recentNotifications) {
                 return recentNotifications.takeLast(limit).reversed()
+            }
+        }
+
+        fun getRecentEmails(limit: Int = 5): List<NotificationItem> {
+            synchronized(recentNotifications) {
+                return recentNotifications.filter { it.isEmail }.takeLast(limit).reversed()
             }
         }
 
@@ -64,11 +71,18 @@ class AssistantNotificationService : NotificationListenerService() {
                        pkg.contains("fota") ||
                        (pkg == "android" && (combined.contains("update") || combined.contains("firmware") || combined.contains("restart to update")))
 
+        // Detect Incoming Emails (Gmail, Samsung Mail, Outlook)
+        val isEmail = pkg == "com.google.android.gm" || 
+                      pkg.contains("mail") || 
+                      pkg.contains("outlook") || 
+                      pkg.contains("email")
+
         val item = NotificationItem(
             packageName = sbn.packageName,
             title = title,
             text = text,
-            isSystemAlert = isUpdate
+            isSystemAlert = isUpdate,
+            isEmail = isEmail
         )
 
         synchronized(recentNotifications) {

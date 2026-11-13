@@ -126,6 +126,11 @@ class MainActivity : AppCompatActivity() {
         isProcessingCommand = false
         VoiceManager.stopSpeaking()
 
+        // Proactively scan WiFi mesh for Smart TVs and appliances in background
+        if (SmartTvManager.activeTv == null) {
+            SmartTvManager.scanLocalNetwork(this)
+        }
+
         // Stop background wake service when app is in foreground to prevent mic collisions
         try {
             stopService(Intent(this, WakeWordService::class.java))
@@ -389,14 +394,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun restartAmbientListener() {
         if (!isHandsFreeEnabled || isProcessingCommand || VoiceManager.isCurrentlySpeaking() || isFinishing || isDestroyed) return
-        runOnUiThread {
-            try {
-                ambientRecognizer?.cancel()
-                launchAmbientListeningIntent()
-            } catch (e: Exception) {
-                startAmbientWakeWordListener()
-            }
-        }
+        startAmbientWakeWordListener()
     }
 
     private fun launchAmbientListeningIntent() {
@@ -409,6 +407,9 @@ class MainActivity : AppCompatActivity() {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
                 }
                 ambientRecognizer?.startListening(intent)
             } catch (e: Exception) {
@@ -462,32 +463,25 @@ class MainActivity : AppCompatActivity() {
         isProcessingCommand = true
         setCoreActive(true)
         binding.tvCoreState.text = "ONLINE // LISTENING..."
-        binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir."
+        binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: Yes, Sir?"
 
         try {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
             }
         } catch (e: Exception) {}
 
         SoundEffectManager.playWakeChime()
-
-        VoiceManager.speak("At your service, Sir.") {
-            runOnUiThread {
-                scope.launch {
-                    delay(200)
-                    triggerVoiceListening()
-                }
-            }
-        }
+        triggerVoiceListening()
     }
 
     private fun evaluateWakeMatch(candidates: List<String>, customSignatures: Set<String>): Pair<Boolean, String> {
         val wakeRegexes = listOf(
-            Regex("""\b(hey|hi|hello|ok|okay|yo|listen)?\s*(jarvis|jervis|jarves|javis|jarviz|service|harvest|travis|charvis|chavez|gervais)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\b(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
+            Regex("""\b(hey|hi|hello|ok|okay|yo|listen|wake\s+up)?\s*(jarvis|jervis|jarves|javis|jarviz|java|javus|javes|tarvis|starvis|service|harvest|travis|charvis|charles|chavez|gervais)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(jarvis|jervis|jarves|javis|jarviz|java|javus|javes|tarvis|starvis)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bwake\s+up\b""", RegexOption.IGNORE_CASE)
         )
 
         for (candidate in candidates) {
@@ -640,6 +634,23 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
             // If not a directly resolved local app, fall through to central AI reasoning
+        }
+
+        // 2b. Check / Read Incoming Emails
+        if (lower.contains("check my email") || lower.contains("check my mail") || 
+            lower.contains("read my email") || lower.contains("read my mail") || 
+            lower.contains("any new email") || lower.contains("any new mail") ||
+            lower.contains("do i have any email") || lower.contains("do i have emails")) {
+            val emails = AssistantNotificationService.getRecentEmails(4)
+            if (emails.isNotEmpty()) {
+                val count = emails.size
+                val summary = emails.joinToString("; ") { "From ${it.title}: ${it.text}" }
+                speakAndDisplay("You have $count recent email notification${if (count > 1) "s" else ""}, Sir: $summary.")
+            } else {
+                speakAndDisplay("No new email notifications logged on your device at this moment, Sir. Opening Gmail for you.")
+                launchApp("com.google.android.gm", "Gmail")
+            }
+            return true
         }
 
         // 3. Make Phone Calls
