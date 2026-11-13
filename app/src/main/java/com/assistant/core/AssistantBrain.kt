@@ -633,7 +633,7 @@ class AssistantBrain(private val context: Context) {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Photosynthesis balances as: 6 CO2 + 6 H2O plus light energy yields C6H12O6 plus 6 O2."))
             }
             else -> {
-                actions.add(AssistantAction(ActionType.SPEAK, value = "I have cross-referenced global frequencies and local telemetry, Sir, but found no definitive records for '$cleanCmd'."))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "I have cross-referenced global frequencies and local telemetry, Sir, but found no definitive records for '$cmd'."))
             }
         }
 
