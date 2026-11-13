@@ -71,7 +71,7 @@ class AssistantNotificationService : NotificationListenerService() {
                 for (sbn in active) {
                     if (sbn.isOngoing) continue
                     val pkg = sbn.packageName.lowercase()
-                    val title = sbn.notification?.extras?.getString(Notification.EXTRA_TITLE) ?: ""
+                    val title = sbn.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
                     val text = sbn.notification?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
                     val combined = "$title $text".lowercase()
 
@@ -158,6 +158,9 @@ class AssistantNotificationService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this
+        try {
+            VoiceManager.init(this)
+        } catch (e: Throwable) {}
         Log.i(TAG, "Jarvis Notification Listener active.")
     }
 
@@ -167,66 +170,70 @@ class AssistantNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        if (sbn == null || sbn.isOngoing) return
+        try {
+            if (sbn == null || sbn.isOngoing) return
 
-        val extras = sbn.notification?.extras ?: return
-        val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+            val extras = sbn.notification?.extras ?: return
+            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
 
-        if (title.isBlank() && text.isBlank()) return
+            if (title.isBlank() && text.isBlank()) return
 
-        val pkg = sbn.packageName.lowercase()
-        val combined = "$title $text".lowercase()
+            val pkg = sbn.packageName.lowercase()
+            val combined = "$title $text".lowercase()
 
-        // 1. Detect Incoming Calls (announce aloud in real-time)
-        val isIncomingCall = sbn.notification?.category == Notification.CATEGORY_CALL ||
-                (pkg.contains("dialer") && (combined.contains("incoming call") || combined.contains("calling") || combined.contains("incoming")))
-        if (isIncomingCall) {
-            val caller = if (title.isNotBlank()) title else "an incoming caller"
-            VoiceManager.speak("Sir, incoming transmission from $caller.")
-            return
-        }
-
-        // 2. Detect Missed Calls
-        val isMissedCall = sbn.notification?.category == Notification.CATEGORY_MISSED_CALL ||
-                (pkg.contains("dialer") && (combined.contains("missed call") || combined.contains("missed")))
-
-        // 3. Detect WhatsApp, Instagram, Snapchat, Mail, SMS
-        val isWhatsApp = pkg.contains("whatsapp")
-        val isInstagram = pkg.contains("instagram")
-        val isSnapchat = pkg.contains("snapchat")
-        val isSms = pkg.contains("messaging") || pkg.contains("mms") || pkg == "com.google.android.apps.messaging" || pkg == "com.samsung.android.messaging"
-        val isEmail = pkg == "com.google.android.gm" || pkg.contains("mail") || pkg.contains("outlook") || pkg.contains("email")
-
-        // 4. Detect Samsung One UI / Android System Software Updates
-        val isUpdate = pkg.contains("wssyncmldm") || 
-                       pkg.contains("soagent") || 
-                       pkg.contains("fota") ||
-                       (pkg == "android" && (combined.contains("update") || combined.contains("firmware") || combined.contains("restart to update")))
-
-        val item = NotificationItem(
-            packageName = sbn.packageName,
-            title = title,
-            text = text,
-            isSystemAlert = isUpdate,
-            isEmail = isEmail,
-            isWhatsApp = isWhatsApp,
-            isInstagram = isInstagram,
-            isSnapchat = isSnapchat,
-            isSms = isSms,
-            isMissedCall = isMissedCall
-        )
-
-        synchronized(recentNotifications) {
-            recentNotifications.add(item)
-            if (recentNotifications.size > 50) {
-                recentNotifications.removeAt(0)
+            // 1. Detect Incoming Calls (announce aloud in real-time)
+            val isIncomingCall = sbn.notification?.category == Notification.CATEGORY_CALL ||
+                    (pkg.contains("dialer") && (combined.contains("incoming call") || combined.contains("calling") || combined.contains("incoming")))
+            if (isIncomingCall) {
+                val caller = if (title.isNotBlank()) title else "an incoming caller"
+                VoiceManager.speak("Sir, incoming transmission from $caller.")
+                return
             }
-        }
 
-        // Proactive Jarvis announcement for Samsung system updates
-        if (isUpdate) {
-            VoiceManager.speak("Sir, Samsung has dispatched a new software update for your device.")
+            // 2. Detect Missed Calls
+            val isMissedCall = sbn.notification?.category == Notification.CATEGORY_MISSED_CALL ||
+                    (pkg.contains("dialer") && (combined.contains("missed call") || combined.contains("missed")))
+
+            // 3. Detect WhatsApp, Instagram, Snapchat, Mail, SMS
+            val isWhatsApp = pkg.contains("whatsapp")
+            val isInstagram = pkg.contains("instagram")
+            val isSnapchat = pkg.contains("snapchat")
+            val isSms = pkg.contains("messaging") || pkg.contains("mms") || pkg == "com.google.android.apps.messaging" || pkg == "com.samsung.android.messaging"
+            val isEmail = pkg == "com.google.android.gm" || pkg.contains("mail") || pkg.contains("outlook") || pkg.contains("email")
+
+            // 4. Detect Samsung One UI / Android System Software Updates
+            val isUpdate = pkg.contains("wssyncmldm") || 
+                           pkg.contains("soagent") || 
+                           pkg.contains("fota") ||
+                           (pkg == "android" && (combined.contains("update") || combined.contains("firmware") || combined.contains("restart to update")))
+
+            val item = NotificationItem(
+                packageName = sbn.packageName,
+                title = title,
+                text = text,
+                isSystemAlert = isUpdate,
+                isEmail = isEmail,
+                isWhatsApp = isWhatsApp,
+                isInstagram = isInstagram,
+                isSnapchat = isSnapchat,
+                isSms = isSms,
+                isMissedCall = isMissedCall
+            )
+
+            synchronized(recentNotifications) {
+                recentNotifications.add(item)
+                if (recentNotifications.size > 50) {
+                    recentNotifications.removeAt(0)
+                }
+            }
+
+            // Proactive Jarvis announcement for Samsung system updates
+            if (isUpdate) {
+                VoiceManager.speak("Sir, Samsung has dispatched a new software update for your device.")
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Safe catch onNotificationPosted", t)
         }
     }
 }

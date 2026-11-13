@@ -170,7 +170,7 @@ class MainActivity : AppCompatActivity() {
         stopAmbientWakeWordListener()
 
         // Hand over acoustic sensor to background service when app moves to background
-        if (isHandsFreeEnabled) {
+        if (isHandsFreeEnabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             try {
                 val wakeIntent = Intent(this, WakeWordService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -178,7 +178,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     startService(wakeIntent)
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "Failed to start background WakeWordService", e)
             }
         }

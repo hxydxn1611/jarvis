@@ -113,10 +113,19 @@ class WakeWordService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed startForeground with microphone type, attempting fallback", e)
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (e2: Throwable) {
+                Log.e(TAG, "Failed fallback startForeground", e2)
+            }
         }
     }
 
@@ -126,8 +135,9 @@ class WakeWordService : Service() {
             return
         }
 
-        speechRecognizer?.destroy()
         try {
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
@@ -163,9 +173,23 @@ class WakeWordService : Service() {
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
             }
-            restartRecognizer()
-        } catch (e: Exception) {
+            launchListeningIntent()
+        } catch (e: Throwable) {
             Log.e(TAG, "SpeechRecognizer initialization failed in background service", e)
+            isListening = false
+        }
+    }
+
+    private fun launchListeningIntent() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }
+            speechRecognizer?.startListening(intent)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to launch speech recognition intent in service", e)
             isListening = false
         }
     }
@@ -181,10 +205,13 @@ class WakeWordService : Service() {
             return
         }
 
-        try {
-            startAcousticListening()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to restart acoustic listener", e)
+        scope.launch {
+            delay(350)
+            try {
+                launchListeningIntent()
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to restart acoustic listener", e)
+            }
         }
     }
 

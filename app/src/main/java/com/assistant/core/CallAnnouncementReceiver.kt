@@ -15,28 +15,50 @@ class CallAnnouncementReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
+        try {
+            if (intent?.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
 
-        val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
-        if (state == TelephonyManager.EXTRA_STATE_RINGING) {
-            val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER) ?: ""
-            val now = System.currentTimeMillis()
-            if (now - lastAnnounceTime < 4000 && lastAnnouncedNumber == incomingNumber) {
-                return // Prevent repeated chime while ringing
+            val state = try {
+                intent.getStringExtra(TelephonyManager.EXTRA_STATE)
+            } catch (e: Throwable) {
+                null
+            } ?: return
+
+            if (state == TelephonyManager.EXTRA_STATE_RINGING) {
+                val incomingNumber = try {
+                    intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER) ?: ""
+                } catch (e: Throwable) {
+                    ""
+                }
+                val now = System.currentTimeMillis()
+                if (now - lastAnnounceTime < 4000 && lastAnnouncedNumber == incomingNumber) {
+                    return // Prevent repeated chime while ringing
+                }
+                lastAnnounceTime = now
+                lastAnnouncedNumber = incomingNumber
+
+                VoiceManager.init(context)
+                val dm = DeviceManager(context)
+                val callerName = if (incomingNumber.isNotBlank()) {
+                    try {
+                        dm.lookupContactNameByNumber(incomingNumber) ?: incomingNumber
+                    } catch (e: Throwable) {
+                        incomingNumber
+                    }
+                } else {
+                    "an incoming caller"
+                }
+
+                Log.i(TAG, "Incoming transmission from: $callerName")
+                try {
+                    SoundEffectManager.playWakeChime()
+                } catch (e: Throwable) {}
+                try {
+                    VoiceManager.speak("Sir, incoming transmission from $callerName.")
+                } catch (e: Throwable) {}
             }
-            lastAnnounceTime = now
-            lastAnnouncedNumber = incomingNumber
-
-            val dm = DeviceManager(context)
-            val callerName = if (incomingNumber.isNotBlank()) {
-                dm.lookupContactNameByNumber(incomingNumber) ?: incomingNumber
-            } else {
-                "an incoming caller"
-            }
-
-            Log.i(TAG, "Incoming transmission from: $callerName")
-            SoundEffectManager.playWakeChime()
-            VoiceManager.speak("Sir, incoming transmission from $callerName.")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Safe catch on telephony broadcast receive", t)
         }
     }
 }
