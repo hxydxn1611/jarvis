@@ -44,12 +44,11 @@ object GhostPilot {
                     }
                 }
 
-                // If 10 digits without country code, default to international format (+91 for India)
-                if (phone.length == 10 && !phone.startsWith("91")) {
-                    phone = "91$phone"
-                }
                 if (phone.startsWith("+")) {
                     phone = phone.removePrefix("+")
+                }
+                if (phone.length == 10) {
+                    phone = "91$phone"
                 }
 
                 if (phone.length >= 10) {
@@ -57,7 +56,12 @@ object GhostPilot {
                     val uri = Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$encoded")
                     val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        setPackage("com.whatsapp")
+                    }
+                    val pm = service.packageManager
+                    if (isPackageInstalled(pm, "com.whatsapp")) {
+                        intent.setPackage("com.whatsapp")
+                    } else if (isPackageInstalled(pm, "com.whatsapp.w4b")) {
+                        intent.setPackage("com.whatsapp.w4b")
                     }
                     service.startActivity(intent)
 
@@ -120,11 +124,11 @@ object GhostPilot {
                     phone = lookedUp.replace(Regex("[^0-9+]"), "")
                 }
             }
-            if (phone.length == 10 && !phone.startsWith("91")) {
-                phone = "91$phone"
-            }
             if (phone.startsWith("+")) {
                 phone = phone.removePrefix("+")
+            }
+            if (phone.length == 10) {
+                phone = "91$phone"
             }
 
             if (phone.length >= 10) {
@@ -132,7 +136,12 @@ object GhostPilot {
                 val uri = Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$encoded")
                 val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    setPackage("com.whatsapp")
+                }
+                val pm = context.packageManager
+                if (isPackageInstalled(pm, "com.whatsapp")) {
+                    intent.setPackage("com.whatsapp")
+                } else if (isPackageInstalled(pm, "com.whatsapp.w4b")) {
+                    intent.setPackage("com.whatsapp.w4b")
                 }
                 context.startActivity(intent)
 
@@ -297,5 +306,14 @@ object GhostPilot {
             if (clickFirstPlayableVideo(node.getChild(i))) return true
         }
         return false
+    }
+
+    private fun isPackageInstalled(pm: android.content.pm.PackageManager, pkg: String): Boolean {
+        return try {
+            pm.getPackageInfo(pkg, 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 }

@@ -23,11 +23,16 @@ import java.util.concurrent.TimeUnit
 class AssistantBrain(private val context: Context) {
 
     companion object {
+        fun isValidGeminiKey(key: String?): Boolean {
+            return !key.isNullOrBlank() && key.startsWith("AIzaSy") && key.length >= 30
+        }
+
         // Obfuscated bundled key for zero-config activation
         private const val BUNDLED_KEY_ENC = "QVEuQWI4Uk42TDl1aTR2VTFhb0RaOW85V3FCTlptOVJzZjF6NzBiXzg3V2E3QnJYSC1OTWc="
         val BUNDLED_API_KEY: String by lazy {
             try {
-                String(android.util.Base64.decode(BUNDLED_KEY_ENC, android.util.Base64.DEFAULT)).trim()
+                val decoded = String(android.util.Base64.decode(BUNDLED_KEY_ENC, android.util.Base64.DEFAULT)).trim()
+                if (isValidGeminiKey(decoded)) decoded else ""
             } catch (e: Exception) {
                 ""
             }
@@ -61,8 +66,8 @@ class AssistantBrain(private val context: Context) {
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
         // Mode 1: Sub-Second Streaming Super-Intelligence (Gemini)
-        val effectiveKey = if (!apiKey.isNullOrBlank()) apiKey else BUNDLED_API_KEY
-        if (effectiveKey.isNotBlank()) {
+        val effectiveKey = if (isValidGeminiKey(apiKey)) apiKey!! else BUNDLED_API_KEY
+        if (isValidGeminiKey(effectiveKey)) {
             try {
                 val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, effectiveKey, onSentenceStream)
                 conversationHistory.add(Pair(cleanCmd, speech))
@@ -290,7 +295,7 @@ class AssistantBrain(private val context: Context) {
             }
         }
 
-        Pair("All systems nominal, Sir. Awaiting your directive.", emptyList())
+        throw java.io.IOException("All Gemini model endpoints failed (Network unreachable or invalid API key)")
     }
 
     suspend fun analyzeVisualFrameStream(
@@ -491,10 +496,40 @@ class AssistantBrain(private val context: Context) {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Initiating communications with $target."))
                 actions.add(AssistantAction(ActionType.CALL_PHONE, target = target))
             }
-            lower.startsWith("play ") -> {
-                val song = lower.removePrefix("play ").trim()
-                actions.add(AssistantAction(ActionType.SPEAK, value = "Queuing $song on your audio channels, Sir."))
-                actions.add(AssistantAction(ActionType.PLAY_SPOTIFY, target = song))
+            lower.startsWith("play ") || lower.contains("youtube") || lower.contains("play songs") || lower.contains("play music") -> {
+                val song = if (lower.contains("play ")) lower.substringAfter("play ").removeSuffix("on youtube").trim() else "trending songs"
+                val cleanSong = if (song.isBlank() || song == "songs" || song == "music") "trending songs" else song
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Queuing $cleanSong on your audio channels, Sir."))
+                actions.add(AssistantAction(ActionType.PLAY_YOUTUBE, target = cleanSong))
+            }
+            lower.contains("whatsapp") -> {
+                val phone = Regex("""\b\d{10,13}\b""").find(lower)?.value ?: ""
+                val msg = if (lower.contains("saying ")) lower.substringAfter("saying ").trim() else "Hi"
+                if (phone.isNotBlank()) {
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "Transmitting WhatsApp message to $phone, Sir."))
+                    actions.add(AssistantAction(ActionType.SEND_WHATSAPP, target = phone, value = msg))
+                } else {
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "Opening WhatsApp communications, Sir."))
+                    actions.add(AssistantAction(ActionType.OPEN_APP, target = "com.whatsapp"))
+                }
+            }
+            lower.contains("mail") || lower.contains("email") || lower.contains("gmail") -> {
+                val emails = AssistantNotificationService.getRecentEmails(4)
+                if (emails.isNotEmpty()) {
+                    val summary = emails.joinToString("; ") { "${it.title}: ${it.text}" }
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "You have ${emails.size} email alerts, Sir: $summary."))
+                } else {
+                    actions.add(AssistantAction(ActionType.SPEAK, value = "No unread email alerts logged, Sir. Opening your Gmail inbox."))
+                    actions.add(AssistantAction(ActionType.OPEN_APP, target = "com.google.android.gm"))
+                }
+            }
+            lower.contains("weather") || lower.contains("temperature") || lower.contains("forecast") -> {
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Accessing device weather telemetry, Sir."))
+                actions.add(AssistantAction(ActionType.OPEN_APP, target = "com.sec.android.daemonapp"))
+            }
+            lower.contains("tv") || lower.contains("smart view") -> {
+                actions.add(AssistantAction(ActionType.SHOW_TV_REMOTE))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Displaying Smart TV interface, Sir."))
             }
             lower.contains("flashlight on") || lower.contains("torch on") -> {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Illuminating torch, Sir."))

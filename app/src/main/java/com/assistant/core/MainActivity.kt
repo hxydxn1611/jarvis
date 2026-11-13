@@ -37,7 +37,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
 
@@ -48,6 +52,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var brain: AssistantBrain
     private val scope = CoroutineScope(Dispatchers.Main)
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
     private var coreAnimator: ObjectAnimator? = null
 
     // Ambient Hands-Free Wake Engine
@@ -93,8 +101,9 @@ class MainActivity : AppCompatActivity() {
         if (!prefs.contains("hands_free_wake_word")) {
             prefs.edit().putBoolean("hands_free_wake_word", true).apply()
         }
-        if (prefs.getString("gemini_api_key", "").isNullOrBlank()) {
-            prefs.edit().putString("gemini_api_key", AssistantBrain.BUNDLED_API_KEY).apply()
+        val savedKey = prefs.getString("gemini_api_key", "") ?: ""
+        if (!AssistantBrain.isValidGeminiKey(savedKey) && savedKey.startsWith("AQ.")) {
+            prefs.edit().remove("gemini_api_key").apply()
         }
 
         brain = AssistantBrain(this)
@@ -645,11 +654,108 @@ class MainActivity : AppCompatActivity() {
 
     // --- Direct Native Device Execution Engine ---
 
+    private fun fetchLiveWeather(cityQuery: String = "", onResult: (String) -> Unit) {
+        scope.launch(Dispatchers.IO) {
+            val url = if (cityQuery.isNotBlank()) {
+                "https://wttr.in/${java.net.URLEncoder.encode(cityQuery, "UTF-8")}?format=%C,+%t+(Humidity:+%h)"
+            } else {
+                "https://wttr.in/?format=%C,+%t+(Humidity:+%h)"
+            }
+            try {
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "curl/7.88.1")
+                    .build()
+                val resp = httpClient.newCall(req).execute()
+                val body = resp.body?.string()?.trim() ?: ""
+                if (resp.isSuccessful && body.isNotBlank() && !body.contains("<html") && !body.contains("Unknown")) {
+                    withContext(Dispatchers.Main) {
+                        onResult(body)
+                    }
+                    return@launch
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Weather fetch failed", e)
+            }
+            withContext(Dispatchers.Main) {
+                onResult("")
+            }
+        }
+    }
+
+    private fun parseWhatsAppCommand(lower: String): Pair<String, String>? {
+        if (!lower.contains("whatsapp") && !lower.startsWith("send msg") && !lower.startsWith("send message")) {
+            return null
+        }
+
+        // 1. Extract phone number if present in input
+        val phoneRegex = Regex("""(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}|\b\d{10,13}\b""")
+        val phoneMatch = phoneRegex.find(lower)
+        var target = phoneMatch?.value?.replace(Regex("[^0-9+]"), "") ?: ""
+
+        // 2. If no phone digits found, search for contact name
+        if (target.isBlank()) {
+            val contactPatterns = listOf(
+                Regex("""(?:to\s+)(?:contact\s+)?([a-zA-Z\s]+?)(?:\s+(?:saying|that|telling|with|message|msg|hi|hello)\b|$)"""),
+                Regex("""(?:whatsapp\s+)([a-zA-Z\s]+?)(?:\s+(?:saying|that|telling|with|message|msg|hi|hello)\b|$)"""),
+                Regex("""(?:send\s+(?:a\s+)?(?:message|msg)\s+(?:on|in)?\s*whatsapp\s+to\s+)([a-zA-Z\s]+)""")
+            )
+            for (p in contactPatterns) {
+                val m = p.find(lower)
+                if (m != null) {
+                    val name = m.groupValues[1].replace("the number", "").trim()
+                    if (name.isNotBlank() && name != "someone" && name != "anyone") {
+                        target = name
+                        break
+                    }
+                }
+            }
+        }
+
+        // 3. Extract message content
+        var message = ""
+        val sayingMatch = Regex("""(?:saying|that|telling|with message|with text)\s+(.+)""").find(lower)
+        if (sayingMatch != null) {
+            message = sayingMatch.groupValues[1].trim()
+        } else if (Regex("""send\s+(?:a\s+)?(.+?)\s+(?:in|on)\s+whatsapp""").containsMatchIn(lower)) {
+            val candidate = Regex("""send\s+(?:a\s+)?(.+?)\s+(?:in|on)\s+whatsapp""").find(lower)?.groupValues?.get(1)?.trim() ?: ""
+            if (candidate != "message" && candidate != "msg" && candidate != "text") {
+                message = candidate
+            }
+        } else if (Regex("""send\s+(?:a\s+)?(.+?)\s+to\s+""").containsMatchIn(lower)) {
+            val candidate = Regex("""send\s+(?:a\s+)?(.+?)\s+to\s+""").find(lower)?.groupValues?.get(1)?.trim() ?: ""
+            if (candidate != "message" && candidate != "msg" && candidate != "text" && !candidate.contains("whatsapp")) {
+                message = candidate
+            }
+        } else if (target.isNotBlank() && lower.contains(target)) {
+            val afterTarget = lower.substringAfter(target).trim()
+            val cleaned = afterTarget.removePrefix("saying").removePrefix("telling").removePrefix("that").removePrefix("with").trim()
+            if (cleaned.isNotBlank()) {
+                message = cleaned
+            }
+        }
+
+        if (message.isBlank()) {
+            if (lower.contains(" hi ") || lower.endsWith(" hi") || lower.startsWith("hi ") || lower.contains(" a hi")) {
+                message = "Hi"
+            } else if (lower.contains(" hello ") || lower.endsWith(" hello") || lower.startsWith("hello ")) {
+                message = "Hello"
+            } else {
+                message = "Hi, this message was dispatched via Jarvis."
+            }
+        }
+
+        if (target.isNotBlank()) {
+            return Pair(target, message)
+        }
+        return null
+    }
+
     private fun tryHandleDirectCommand(input: String): Boolean {
         var clean = input.lowercase().trim()
         val prefixesToStrip = listOf(
             "hey jarvis", "ok jarvis", "okay jarvis", "hello jarvis", "hi jarvis",
-            "jarvis please", "jarvis can you", "jarvis", "please"
+            "jarvis please", "jarvis can you", "jarvis", "please", "can you", "could you"
         )
         for (prefix in prefixesToStrip) {
             if (clean.startsWith(prefix)) {
@@ -674,35 +780,83 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
-        // 2. Open Applications (Dynamic matching against all installed apps)
-        if (lower.startsWith("open ") || lower.startsWith("launch ") || lower.startsWith("start ")) {
-            val appName = lower.removePrefix("open ").removePrefix("launch ").removePrefix("start ").trim()
-            val resolved = resolvePackageForApp(appName)
-            if (resolved != null) {
-                launchApp(resolved.first, resolved.second)
-                return true
+        // 2. Weather & Environmental Atmospheric Telemetry
+        if (lower.contains("weather") || lower.contains("temperature") || lower.contains("forecast") || lower.contains("climate")) {
+            speakAndDisplay("Scanning environmental atmospheric telemetry, Sir...")
+            val city = if (lower.contains(" in ")) lower.substringAfter(" in ").trim() else ""
+            fetchLiveWeather(city) { weatherText ->
+                if (weatherText.isNotBlank()) {
+                    val loc = if (city.isNotBlank()) "in ${city.replaceFirstChar { it.uppercase() }}" else "locally"
+                    speakAndDisplay("Current atmospheric conditions $loc are $weatherText, Sir.")
+                } else {
+                    speakAndDisplay("Deploying device weather radar, Sir.")
+                    val resolved = resolvePackageForApp("weather")
+                    if (resolved != null) {
+                        launchApp(resolved.first, resolved.second)
+                    } else {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather")).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            })
+                        } catch (e: Exception) {}
+                    }
+                }
             }
-            // If not a directly resolved local app, fall through to central AI reasoning
+            return true
         }
 
-        // 2b. Check / Read Incoming Emails
-        if (lower.contains("check my email") || lower.contains("check my mail") || 
-            lower.contains("read my email") || lower.contains("read my mail") || 
-            lower.contains("any new email") || lower.contains("any new mail") ||
-            lower.contains("do i have any email") || lower.contains("do i have emails")) {
-            val emails = AssistantNotificationService.getRecentEmails(4)
+        // 3. WhatsApp Autonomous Messaging
+        val wa = parseWhatsAppCommand(lower)
+        if (wa != null) {
+            val (target, msg) = wa
+            speakAndDisplay("Transmitting '$msg' via WhatsApp to $target, Sir.")
+            GhostPilot.sendWhatsApp(this, target, msg) { success, feedback ->
+                Log.i(TAG, feedback)
+            }
+            return true
+        }
+
+        // 4. Check / Read Incoming Emails & Gmail
+        if ((lower.contains("mail") || lower.contains("email") || lower.contains("gmail")) && !lower.contains("send ")) {
+            val emails = AssistantNotificationService.getRecentEmails(5)
             if (emails.isNotEmpty()) {
                 val count = emails.size
                 val summary = emails.joinToString("; ") { "From ${it.title}: ${it.text}" }
                 speakAndDisplay("You have $count recent email notification${if (count > 1) "s" else ""}, Sir: $summary.")
             } else {
-                speakAndDisplay("No new email notifications logged on your device at this moment, Sir. Opening Gmail for you.")
+                speakAndDisplay("No new email notifications logged on your device at this moment, Sir. Opening your Gmail inbox now.")
                 launchApp("com.google.android.gm", "Gmail")
             }
             return true
         }
 
-        // 3. Make Phone Calls
+        // 5. YouTube & Music Playback
+        if (!lower.contains("on tv") && !lower.contains("to tv") && 
+            (lower.contains("youtube") || lower.startsWith("play ") || lower.contains("play songs") || lower.contains("play music"))) {
+            var query = when {
+                lower.contains("and play ") -> lower.substringAfter("and play ").trim()
+                lower.contains("play ") && lower.contains("on youtube") -> lower.substringAfter("play ").substringBefore("on youtube").trim()
+                lower.startsWith("play ") -> lower.removePrefix("play ").removeSuffix("on youtube").trim()
+                lower.contains("play ") -> lower.substringAfter("play ").removeSuffix("on youtube").trim()
+                lower.contains("open youtube") || lower.contains("launch youtube") -> ""
+                else -> lower.removePrefix("youtube ").trim()
+            }
+            if (query == "songs" || query == "some songs" || query == "music" || query == "a song") {
+                query = "trending songs"
+            }
+
+            if (query.isNotBlank()) {
+                speakAndDisplay("Opening YouTube and streaming $query, Sir.")
+                GhostPilot.playYouTube(this, query)
+                return true
+            } else {
+                speakAndDisplay("Launching YouTube, Sir.")
+                launchApp("com.google.android.youtube", "YouTube")
+                return true
+            }
+        }
+
+        // 6. Make Phone Calls
         if (lower.startsWith("call ") || lower.startsWith("make a call to ") || lower.startsWith("dial ")) {
             val target = lower.removePrefix("make a call to ").removePrefix("call ").removePrefix("dial ").trim()
             if (target.isNotBlank()) {
@@ -712,15 +866,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 4. Play YouTube / Music
-        if (lower.startsWith("play ")) {
-            val song = lower.removePrefix("play ").trim()
-            speakAndDisplay("Queuing $song on your audio channels, Sir.")
-            GhostPilot.playYouTube(this, song)
-            return true
-        }
-
-        // 5. Volume adjustment
+        // 7. Volume adjustment
         if (lower.contains("volume up") || lower.contains("increase volume") || lower.contains("raise volume")) {
             val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
             am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
@@ -734,26 +880,7 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
-        // 6. WhatsApp Transmission (Any contact or phone number)
-        val waPatterns = listOf(
-            Regex("""(?:send\s+)?(?:a\s+)?(?:message|msg)\s+(?:on|in)?\s*whatsapp\s+(?:to\s+)?(.+?)\s+(?:saying|that|telling|with message)\s+(.+)""", RegexOption.IGNORE_CASE),
-            Regex("""whatsapp\s+(?:to\s+)?(.+?)\s+(?:saying|that|telling)\s+(.+)""", RegexOption.IGNORE_CASE),
-            Regex("""(?:send\s+)?(?:a\s+)?whatsapp\s+(?:to\s+)?(.+?)\s+(?:saying|that|telling)\s+(.+)""", RegexOption.IGNORE_CASE),
-            Regex("""message\s+(.+?)\s+on\s+whatsapp\s+(?:saying|that)\s+(.+)""", RegexOption.IGNORE_CASE),
-            Regex("""whatsapp\s+([a-zA-Z0-9_+]+)\s+(.+)""", RegexOption.IGNORE_CASE)
-        )
-        for (pat in waPatterns) {
-            val match = pat.find(lower)
-            if (match != null) {
-                val target = match.groupValues[1].trim()
-                val msg = match.groupValues[2].trim()
-                speakAndDisplay("Transmitting WhatsApp message to $target, Sir.")
-                GhostPilot.sendWhatsApp(this, target, msg)
-                return true
-            }
-        }
-
-        // 7. Wireless Smart TV Jump & Casting (DIAL, Samsung Tizen, Roku, DLNA, Smart View)
+        // 8. Wireless Smart TV Jump & Casting (DIAL, Samsung Tizen, Roku, DLNA, Smart View)
         if (lower.contains("tv remote") || lower.contains("control tv") || lower == "tv" || lower == "smart tv" || lower.contains("open tv remote") || lower.contains("show tv remote") || lower.contains("open tv")) {
             speakAndDisplay("Opening Smart TV control console, Sir.")
             showTvRemoteDialog()
@@ -814,6 +941,16 @@ class MainActivity : AppCompatActivity() {
         if (lower.contains("scan wifi") || lower.contains("scan network") || lower.contains("find tv") || lower.contains("find my tv")) {
             triggerSmartTvScan(autoShowDialog = true)
             return true
+        }
+
+        // 9. Open Applications (Dynamic matching against all installed apps)
+        if (lower.startsWith("open ") || lower.startsWith("launch ") || lower.startsWith("start ")) {
+            val appName = lower.removePrefix("open ").removePrefix("launch ").removePrefix("start ").trim()
+            val resolved = resolvePackageForApp(appName)
+            if (resolved != null) {
+                launchApp(resolved.first, resolved.second)
+                return true
+            }
         }
 
         return false
@@ -1485,9 +1622,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        val hasKey = !prefs.getString("gemini_api_key", "").isNullOrBlank() || AssistantBrain.BUNDLED_API_KEY.isNotBlank()
+        val hasKey = AssistantBrain.isValidGeminiKey(prefs.getString("gemini_api_key", "")) || AssistantBrain.BUNDLED_API_KEY.isNotBlank()
         if (hasKey) {
             binding.tvStatusPill.text = "● SUPER-BRAIN ONLINE"
+        } else {
+            binding.tvStatusPill.text = "● SYSTEM ACTIVE"
         }
     }
 
