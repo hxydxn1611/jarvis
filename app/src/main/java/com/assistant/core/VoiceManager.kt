@@ -146,9 +146,32 @@ object VoiceManager : TextToSpeech.OnInitListener {
                 }
             }
 
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                if (utteranceId != null) {
+                    val cb = speechCallbacks.remove(utteranceId)
+                    cb?.invoke()
+                }
+                isSpeaking = false
+                val finalCb = turnCompletionCallback
+                turnCompletionCallback = null
+                finalCb?.invoke()
+            }
+
             override fun onError(utteranceId: String?) {
                 if (utteranceId != null) {
-                    speechCallbacks.remove(utteranceId)
+                    val cb = speechCallbacks.remove(utteranceId)
+                    cb?.invoke()
+                }
+                isSpeaking = false
+                val finalCb = turnCompletionCallback
+                turnCompletionCallback = null
+                finalCb?.invoke()
+            }
+
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                if (utteranceId != null) {
+                    val cb = speechCallbacks.remove(utteranceId)
+                    cb?.invoke()
                 }
                 isSpeaking = false
                 val finalCb = turnCompletionCallback
@@ -244,10 +267,10 @@ object VoiceManager : TextToSpeech.OnInitListener {
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
 
-                // Snappy 600ms silence length for sub-second rapid response
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
+                // Snappy 450ms silence length for sub-second rapid response
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 350L)
             }
 
             recognizer.setRecognitionListener(object : RecognitionListener {

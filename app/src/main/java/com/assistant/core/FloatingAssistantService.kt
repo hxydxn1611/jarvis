@@ -112,7 +112,32 @@ class FloatingAssistantService : Service() {
                         VoiceManager.streamSentence(chunk)
                     }
                     if (actions.isNotEmpty()) {
-                        AssistantAccessibilityService.instance?.executeActions(actions)
+                        val dm = DeviceManager(this@FloatingAssistantService)
+                        for (action in actions) {
+                            when (action.type) {
+                                ActionType.FLASHLIGHT_TOGGLE -> dm.toggleTorch(action.value != "false")
+                                ActionType.CALL_PHONE -> action.target?.let { dm.makeCall(it) }
+                                ActionType.PLAY_YOUTUBE, ActionType.PLAY_SPOTIFY -> action.target?.let { GhostPilot.playYouTube(this@FloatingAssistantService, it) }
+                                ActionType.SEND_WHATSAPP -> action.target?.let { GhostPilot.sendWhatsApp(this@FloatingAssistantService, it, action.value ?: "") }
+                                ActionType.OPEN_APP -> {
+                                    val pkg = action.target
+                                    if (pkg != null) {
+                                        val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+                                        if (launchIntent != null) {
+                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            startActivity(launchIntent)
+                                        }
+                                    }
+                                }
+                                ActionType.COMMUNICATION_UPDATES -> {
+                                    val report = AssistantNotificationService.getChannelUpdatesReport(this@FloatingAssistantService)
+                                    val spoken = AssistantNotificationService.formatSpokenUpdates(report)
+                                    VoiceManager.speak(spoken)
+                                }
+                                ActionType.SPEAK -> action.value?.let { VoiceManager.speak(it) }
+                                else -> AssistantAccessibilityService.instance?.executeActions(listOf(action))
+                            }
+                        }
                     }
                 }
             },

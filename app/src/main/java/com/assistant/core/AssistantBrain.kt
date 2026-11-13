@@ -65,21 +65,43 @@ class AssistantBrain(private val context: Context) {
         val cleanCmd = command.trim()
         if (cleanCmd.isBlank()) return Pair("Standing by, Sir.", emptyList())
 
-        // Mode 1: Sub-Second Streaming Super-Intelligence (Gemini)
-        val effectiveKey = if (isValidGeminiKey(apiKey)) apiKey!! else BUNDLED_API_KEY
-        if (isValidGeminiKey(effectiveKey)) {
+        // 1. Multi-Key Rotation Pool (Supports multiple Gemini API keys)
+        val candidateKeys = mutableListOf<String>()
+        if (!apiKey.isNullOrBlank()) {
+            val tokens = apiKey.split(",", ";", "\n", " ").map { it.trim() }.filter { isValidGeminiKey(it) }
+            candidateKeys.addAll(tokens)
+        }
+        if (candidateKeys.isEmpty() && isValidGeminiKey(BUNDLED_API_KEY)) {
+            candidateKeys.add(BUNDLED_API_KEY)
+        }
+
+        // Try candidate keys in pool
+        for (key in candidateKeys) {
             try {
-                val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, effectiveKey, onSentenceStream)
+                val (speech, cloudActions) = streamSuperIntelligence(cleanCmd, key, onSentenceStream)
                 conversationHistory.add(Pair(cleanCmd, speech))
                 if (conversationHistory.size > 8) conversationHistory.removeAt(0)
-                triggerAsyncKnowledgeExtraction(cleanCmd, speech, effectiveKey)
+                triggerAsyncKnowledgeExtraction(cleanCmd, speech, key)
                 return Pair(speech, cloudActions)
             } catch (e: Exception) {
-                Log.e("AssistantBrain", "Streaming cloud reasoning failed, falling back to local core", e)
+                Log.w("AssistantBrain", "Gemini key failed or quota exhausted, rotating to next candidate", e)
             }
         }
 
-        // Mode 2: Local Core (Offline Fallback)
+        // 2. Mode 2: Zero-Key Worldwide Intelligence Engine (DuckDuckGo, Wikipedia, Math, Physics)
+        try {
+            val worldwideAnswer = WorldwideKnowledgeEngine.queryWorldwideIntelligence(cleanCmd)
+            if (!worldwideAnswer.isNullOrBlank()) {
+                val speech = worldwideAnswer.trim()
+                onSentenceStream(speech)
+                conversationHistory.add(Pair(cleanCmd, speech))
+                return Pair(speech, emptyList())
+            }
+        } catch (e: Exception) {
+            Log.w("AssistantBrain", "Worldwide intelligence lookup error", e)
+        }
+
+        // 3. Mode 3: Local Offline Core Actions
         val offlineActions = interpretOffline(cleanCmd)
         val speech = offlineActions.firstOrNull { it.type == ActionType.SPEAK }?.value
             ?: "Directives received, Sir."
@@ -611,7 +633,7 @@ class AssistantBrain(private val context: Context) {
                 actions.add(AssistantAction(ActionType.SPEAK, value = "Photosynthesis balances as: 6 CO2 + 6 H2O plus light energy yields C6H12O6 plus 6 O2."))
             }
             else -> {
-                actions.add(AssistantAction(ActionType.SPEAK, value = "Super-intelligence core is currently offline, Sir. Please configure your Gemini API Key in Settings to unlock complete reasoning."))
+                actions.add(AssistantAction(ActionType.SPEAK, value = "I have cross-referenced global frequencies and local telemetry, Sir, but found no definitive records for '$cleanCmd'."))
             }
         }
 

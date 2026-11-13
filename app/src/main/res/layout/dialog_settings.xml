@@ -27,7 +27,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Paste your free Gemini API Key from Google AI Studio (aistudio.google.com) to unlock hyper-intelligent reasoning and screen vision."
+        android:text="Paste one or more Gemini API Keys (comma-separated for auto-rotation) from Google AI Studio. When quota runs out or offline, Zero-Key Worldwide Web Intelligence automatically takes over."
         android:textColor="#81D4FA"
         android:textSize="13sp"
         android:layout_marginTop="8dp"

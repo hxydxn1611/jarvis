@@ -103,6 +103,40 @@ class AssistantAccessibilityService : AccessibilityService() {
         return textList
     }
 
+    fun readVisibleEmails(limit: Int = 3): List<String> {
+        val root = rootInActiveWindow ?: return emptyList()
+        val emails = mutableListOf<String>()
+
+        fun scanNode(node: AccessibilityNodeInfo) {
+            if (emails.size >= limit) return
+            val desc = node.contentDescription?.toString() ?: ""
+            val text = node.text?.toString() ?: ""
+
+            if (desc.isNotBlank() && (desc.contains("unread", ignoreCase = true) || desc.contains("sender", ignoreCase = true) || desc.contains("subject", ignoreCase = true))) {
+                val clean = desc.replace(Regex("""\b(unread|read|attachment|star|starred)\b""", RegexOption.IGNORE_CASE), "").trim()
+                if (clean.length > 8 && !emails.contains(clean)) {
+                    emails.add(clean)
+                }
+            } else if (text.isNotBlank() && text.length > 8) {
+                if (!emails.contains(text) && 
+                    !text.equals("Search in mail", ignoreCase = true) && 
+                    !text.equals("Primary", ignoreCase = true) &&
+                    !text.equals("Social", ignoreCase = true) &&
+                    !text.equals("Promotions", ignoreCase = true) &&
+                    !text.startsWith("http")) {
+                    emails.add(text)
+                }
+            }
+
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { scanNode(it) }
+            }
+        }
+
+        scanNode(root)
+        return emails.take(limit)
+    }
+
     private fun collectText(node: AccessibilityNodeInfo, list: MutableList<String>) {
         node.text?.toString()?.takeIf { it.isNotBlank() }?.let { list.add(it) }
         node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { list.add(it) }

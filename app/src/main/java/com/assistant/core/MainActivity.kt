@@ -433,9 +433,9 @@ class MainActivity : AppCompatActivity() {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 350L)
                 }
                 ambientRecognizer?.startListening(intent)
             } catch (e: Exception) {
@@ -856,8 +856,24 @@ class MainActivity : AppCompatActivity() {
                 val summary = emails.joinToString("; ") { "From ${it.title}: ${it.text}" }
                 speakAndDisplay("You have $count recent email notification${if (count > 1) "s" else ""}, Sir: $summary.")
             } else {
-                speakAndDisplay("No new email notifications logged on your device at this moment, Sir. Opening your Gmail inbox now.")
+                speakAndDisplay("Opening your Gmail inbox to inspect incoming transmissions, Sir...")
                 launchApp("com.google.android.gm", "Gmail")
+                scope.launch {
+                    delay(1500)
+                    val visibleEmails = AssistantAccessibilityService.instance?.readVisibleEmails(3) ?: emptyList()
+                    if (visibleEmails.isNotEmpty()) {
+                        val readout = visibleEmails.joinToString("; ")
+                        speakAndDisplay("Recent transmissions detected in your inbox, Sir: $readout.")
+                    } else {
+                        val textItems = AssistantAccessibilityService.instance?.dumpVisibleText() ?: emptyList()
+                        val filtered = textItems.filter { it.length > 8 && !it.startsWith("http") && !it.contains("Search", ignoreCase = true) && !it.contains("Primary", ignoreCase = true) }.take(3)
+                        if (filtered.isNotEmpty()) {
+                            speakAndDisplay("Recent messages on screen, Sir: ${filtered.joinToString("; ")}.")
+                        } else {
+                            speakAndDisplay("Gmail inbox opened, Sir. No new transmission previews visible on screen.")
+                        }
+                    }
+                }
             }
             return true
         }
@@ -1783,11 +1799,11 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             dialog.dismiss()
             if (key.isNotBlank()) {
-                Toast.makeText(this, "Super-Intelligence Online!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Super-Intelligence Online (Key Pool Active)!", Toast.LENGTH_SHORT).show()
                 binding.tvStatusPill.text = "● SUPER-BRAIN ONLINE"
             } else {
-                Toast.makeText(this, "Offline Core Active", Toast.LENGTH_SHORT).show()
-                binding.tvStatusPill.text = "● SYSTEM ACTIVE"
+                Toast.makeText(this, "Worldwide Web Core Active (Zero Key)", Toast.LENGTH_SHORT).show()
+                binding.tvStatusPill.text = "● WORLDWIDE CORE ACTIVE"
             }
         }
 
@@ -1854,7 +1870,7 @@ class MainActivity : AppCompatActivity() {
         if (hasKey) {
             binding.tvStatusPill.text = "● SUPER-BRAIN ONLINE"
         } else {
-            binding.tvStatusPill.text = "● SYSTEM ACTIVE"
+            binding.tvStatusPill.text = "● WORLDWIDE CORE ACTIVE"
         }
     }
 

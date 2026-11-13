@@ -184,8 +184,13 @@ class WakeWordService : Service() {
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                val deviceTag = Locale.getDefault().toLanguageTag()
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, deviceTag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, deviceTag)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 350L)
             }
             speechRecognizer?.startListening(intent)
         } catch (e: Throwable) {
@@ -297,6 +302,20 @@ class WakeWordService : Service() {
                                             startActivity(launchIntent)
                                         }
                                     }
+                                }
+                                ActionType.COMMUNICATION_UPDATES -> {
+                                    val report = AssistantNotificationService.getChannelUpdatesReport(this@WakeWordService)
+                                    val spoken = AssistantNotificationService.formatSpokenUpdates(report)
+                                    VoiceManager.speak(spoken)
+                                }
+                                ActionType.WORKOUT_GUIDE -> {
+                                    val intent = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                    }
+                                    startActivity(intent)
+                                }
+                                ActionType.SPEAK -> {
+                                    action.value?.let { VoiceManager.speak(it) }
                                 }
                                 else -> AssistantAccessibilityService.instance?.executeActions(listOf(action))
                             }
