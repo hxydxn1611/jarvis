@@ -49,7 +49,7 @@
             android:background="@drawable/card_background"
             android:paddingHorizontal="10dp"
             android:paddingVertical="6dp"
-            android:text="🎤 WAKE: ON"
+            android:text="🎤 WAKE: ARMED"
             android:textColor="#00E5FF"
             android:textSize="11sp"
             android:fontFamily="monospace" />

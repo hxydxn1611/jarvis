@@ -204,8 +204,8 @@ class WakeWordService : Service() {
         var command = ""
 
         val wakeRegexes = listOf(
-            Regex("""\b(hey|hi|hello|ok|okay|yo)?\s*(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\bjarvis\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(hey|hi|hello|ok|okay|yo|listen)?\s*(jarvis|jervis|jarves|javis|jarviz|service|harvest|travis|charvis|chavez|gervais)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
             Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
         )
 
@@ -241,7 +241,25 @@ class WakeWordService : Service() {
                         VoiceManager.streamSentence(chunk)
                     }
                     if (actions.isNotEmpty()) {
-                        AssistantAccessibilityService.instance?.executeActions(actions)
+                        val dm = DeviceManager(this@WakeWordService)
+                        for (action in actions) {
+                            when (action.type) {
+                                ActionType.FLASHLIGHT_TOGGLE -> dm.toggleTorch(action.value != "false")
+                                ActionType.CALL_PHONE -> action.target?.let { dm.makeCall(it) }
+                                ActionType.PLAY_YOUTUBE, ActionType.PLAY_SPOTIFY -> action.target?.let { GhostPilot.playYouTube(this@WakeWordService, it) }
+                                ActionType.OPEN_APP -> {
+                                    val pkg = action.target
+                                    if (pkg != null) {
+                                        val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+                                        if (launchIntent != null) {
+                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            startActivity(launchIntent)
+                                        }
+                                    }
+                                }
+                                else -> AssistantAccessibilityService.instance?.executeActions(listOf(action))
+                            }
+                        }
                     }
                     VoiceManager.onTurnComplete {
                         scope.launch {

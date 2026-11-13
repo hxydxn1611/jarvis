@@ -213,7 +213,12 @@ object VoiceManager : TextToSpeech.OnInitListener {
         isSpeaking = false
     }
 
-    fun listen(context: Context, onResult: (String) -> Unit, onError: ((String) -> Unit)? = null) {
+    fun listen(
+        context: Context,
+        onPartialResult: ((String) -> Unit)? = null,
+        onResult: (String) -> Unit,
+        onError: ((String) -> Unit)? = null
+    ) {
         // Stop any active speech before listening to prevent acoustic feedback
         stopSpeaking()
 
@@ -226,13 +231,16 @@ object VoiceManager : TextToSpeech.OnInitListener {
             val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                val deviceTag = Locale.getDefault().toLanguageTag()
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, deviceTag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, deviceTag)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
 
-                // Stop listening 450ms after user finishes talking
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
+                // Generous 1600ms silence length so user is not cut off mid-thought
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
             }
 
             recognizer.setRecognitionListener(object : RecognitionListener {
@@ -253,12 +261,22 @@ object VoiceManager : TextToSpeech.OnInitListener {
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         if (!matches.isNullOrEmpty()) {
                             onResult(matches[0])
+                        } else {
+                            onError?.invoke("No speech detected.")
                         }
                     } finally {
                         try { recognizer.destroy() } catch (e: Exception) {}
                     }
                 }
-                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val partials = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!partials.isNullOrEmpty()) {
+                        val best = partials[0]
+                        if (best.isNotBlank()) {
+                            onPartialResult?.invoke(best)
+                        }
+                    }
+                }
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
 

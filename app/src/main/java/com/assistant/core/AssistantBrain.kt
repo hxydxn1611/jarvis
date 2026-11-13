@@ -32,7 +32,13 @@ class AssistantBrain(private val context: Context) {
                 ""
             }
         }
-        val CANDIDATE_MODELS = listOf("gemini-3.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.8-flash")
+        val CANDIDATE_MODELS = listOf(
+            "gemini-flash-lite-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview"
+        )
     }
 
     private val httpClient = OkHttpClient.Builder()
@@ -368,9 +374,12 @@ class AssistantBrain(private val context: Context) {
             onSentenceStream(sentenceBuffer.toString().trim())
         }
 
-        val fullText = fullRawBuilder.toString()
+        val fullText = fullRawBuilder.toString().trim()
+        if (fullText.isBlank()) {
+            throw java.io.IOException("Empty SSE response stream")
+        }
         val actionsList = extractActionsFromText(fullText)
-        val finalSpeech = speechBuilder.toString().trim().ifBlank { "Acknowledged, Sir." }
+        val finalSpeech = speechBuilder.toString().trim().ifBlank { fullText }
 
         return Pair(finalSpeech, actionsList)
     }

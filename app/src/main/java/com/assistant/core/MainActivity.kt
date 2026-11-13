@@ -83,7 +83,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
-        isHandsFreeEnabled = prefs.getBoolean("hands_free_wake_word", false)
+        isHandsFreeEnabled = prefs.getBoolean("hands_free_wake_word", true)
+        if (!prefs.contains("hands_free_wake_word")) {
+            prefs.edit().putBoolean("hands_free_wake_word", true).apply()
+        }
         if (prefs.getString("gemini_api_key", "").isNullOrBlank()) {
             prefs.edit().putString("gemini_api_key", AssistantBrain.BUNDLED_API_KEY).apply()
         }
@@ -264,7 +267,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateHandsFreePill() {
         if (isHandsFreeEnabled) {
-            binding.tvHandsFreePill.text = "🎤 WAKE: ON"
+            binding.tvHandsFreePill.text = "🎤 WAKE: ARMED"
             binding.tvHandsFreePill.setTextColor(0xFF00E5FF.toInt())
         } else {
             binding.tvHandsFreePill.text = "🎤 WAKE: OFF"
@@ -314,9 +317,12 @@ class MainActivity : AppCompatActivity() {
                             isAmbientListening = false
                             if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
                                 scope.launch {
-                                    delay(2500)
+                                    // Silence/Speech timeout restarts immediately (<300ms) to ensure continuous readiness
+                                    val isSilence = (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+                                    val restartDelay = if (isSilence) 250L else 1200L
+                                    delay(restartDelay)
                                     if (isHandsFreeEnabled && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
-                                        startAmbientWakeWordListener()
+                                        restartAmbientListener()
                                     }
                                 }
                             }
@@ -329,13 +335,24 @@ class MainActivity : AppCompatActivity() {
                                 handleAmbientSpeechMatches(matches)
                             } else if (isHandsFreeEnabled && !isProcessingCommand) {
                                 scope.launch {
-                                    delay(500)
+                                    delay(200)
                                     restartAmbientListener()
                                 }
                             }
                         }
 
-                        override fun onPartialResults(partialResults: Bundle?) {}
+                        override fun onPartialResults(partialResults: Bundle?) {
+                            val partials = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+                            if (partials.isNotEmpty()) {
+                                val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
+                                val customSignatures = prefs.getStringSet("custom_wake_signatures", emptySet()) ?: emptySet()
+                                val (matched, _) = evaluateWakeMatch(partials, customSignatures)
+                                if (matched && !isProcessingCommand && !VoiceManager.isCurrentlySpeaking()) {
+                                    handleAmbientSpeechMatches(partials)
+                                }
+                            }
+                        }
+
                         override fun onEvent(eventType: Int, params: Bundle?) {}
                     })
                 }
@@ -367,6 +384,7 @@ class MainActivity : AppCompatActivity() {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 }
                 ambientRecognizer?.startListening(intent)
             } catch (e: Exception) {
@@ -387,6 +405,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleAmbientSpeechMatches(matches: List<String>) {
+        if (isProcessingCommand || VoiceManager.isCurrentlySpeaking()) return
         val prefs = getSharedPreferences("AssistantPrefs", Context.MODE_PRIVATE)
         val customSignatures = prefs.getStringSet("custom_wake_signatures", emptySet()) ?: emptySet()
 
@@ -397,38 +416,64 @@ class MainActivity : AppCompatActivity() {
             if (command.isNotBlank()) {
                 handleUserInput(command)
             } else {
-                setCoreActive(true)
-                binding.tvCoreState.text = "LISTENING SIR..."
-                binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir."
-
-                try {
-                    val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-                    }
-                } catch (e: Exception) {}
-
-                VoiceManager.speak("At your service, Sir.") {
-                    scope.launch {
-                        delay(400)
-                        runOnUiThread {
-                            triggerVoiceListening()
-                        }
-                    }
-                }
+                acknowledgeWake()
             }
         } else {
-            scope.launch {
-                delay(600)
-                restartAmbientListener()
+            // Check if user spoke a direct command while viewing the active dashboard
+            val bestCandidate = matches.firstOrNull { it.isNotBlank() }?.trim() ?: ""
+            if (bestCandidate.isNotBlank() && isLikelyDirectCommand(bestCandidate)) {
+                stopAmbientWakeWordListener()
+                handleUserInput(bestCandidate)
+            } else {
+                scope.launch {
+                    delay(300)
+                    restartAmbientListener()
+                }
+            }
+        }
+    }
+
+    private fun isLikelyDirectCommand(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        val directKeywords = listOf(
+            "open ", "launch ", "start ", "turn on", "turn off", "flashlight", "torch",
+            "call ", "dial ", "play ", "volume ", "set alarm", "send ", "search ",
+            "what", "who", "where", "how", "why", "when", "can you", "could you",
+            "explain", "calculate", "solve", "status", "diagnostics", "help", "hello", "hi"
+        )
+        return directKeywords.any { lower.startsWith(it) || lower.contains(it) }
+    }
+
+    private fun acknowledgeWake() {
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
+        setCoreActive(true)
+        binding.tvCoreState.text = "ONLINE // LISTENING..."
+        binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir."
+
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        } catch (e: Exception) {}
+
+        SoundEffectManager.playWakeChime()
+
+        VoiceManager.speak("At your service, Sir.") {
+            runOnUiThread {
+                scope.launch {
+                    delay(200)
+                    triggerVoiceListening()
+                }
             }
         }
     }
 
     private fun evaluateWakeMatch(candidates: List<String>, customSignatures: Set<String>): Pair<Boolean, String> {
         val wakeRegexes = listOf(
-            Regex("""\b(hey|hi|hello|ok|okay|yo)?\s*(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\bjarvis\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(hey|hi|hello|ok|okay|yo|listen)?\s*(jarvis|jervis|jarves|javis|jarviz|service|harvest|travis|charvis|chavez|gervais)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(jarvis|jervis|jarves|javis|jarviz)\b""", RegexOption.IGNORE_CASE),
             Regex("""\bj\.a\.r\.v\.i\.s\b""", RegexOption.IGNORE_CASE)
         )
 
@@ -436,7 +481,7 @@ class MainActivity : AppCompatActivity() {
             val text = candidate.trim()
             // Check custom trained signatures first
             for (custom in customSignatures) {
-                if (text.contains(custom, ignoreCase = true)) {
+                if (custom.isNotBlank() && text.contains(custom, ignoreCase = true)) {
                     val trailing = text.substringAfter(custom, "").trim().removePrefix(",").trim()
                     return Pair(true, trailing)
                 }
@@ -545,7 +590,17 @@ class MainActivity : AppCompatActivity() {
     // --- Direct Native Device Execution Engine ---
 
     private fun tryHandleDirectCommand(input: String): Boolean {
-        val lower = input.lowercase().trim()
+        var clean = input.lowercase().trim()
+        val prefixesToStrip = listOf(
+            "hey jarvis", "ok jarvis", "okay jarvis", "hello jarvis", "hi jarvis",
+            "jarvis please", "jarvis can you", "jarvis", "please"
+        )
+        for (prefix in prefixesToStrip) {
+            if (clean.startsWith(prefix)) {
+                clean = clean.removePrefix(prefix).trim().removePrefix(",").trim()
+            }
+        }
+        val lower = clean
 
         // 1. Flashlight / Torch
         if (lower.contains("flashlight on") || lower.contains("torch on") || 
@@ -790,18 +845,24 @@ class MainActivity : AppCompatActivity() {
 
             VoiceManager.listen(
                 context = this,
+                onPartialResult = { partial ->
+                    runOnUiThread {
+                        binding.tvTranscript.text = "You: $partial..."
+                        binding.tvCoreState.text = "HEARING..."
+                    }
+                },
                 onResult = { spokenText ->
                     setCoreActive(false)
                     handleUserInput(spokenText)
                 },
-                onError = { _ ->
+                onError = { err ->
                     setCoreActive(false)
                     isProcessingCommand = false
                     binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
-                    binding.tvTranscript.text = "Jarvis: Standing by, Sir."
+                    binding.tvTranscript.text = "Jarvis: Standing by, Sir. Tap the core or speak to issue a directive."
                     if (isHandsFreeEnabled) {
                         scope.launch {
-                            delay(600)
+                            delay(400)
                             startAmbientWakeWordListener()
                         }
                     }
