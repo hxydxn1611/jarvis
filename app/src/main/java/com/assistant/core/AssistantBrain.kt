@@ -34,10 +34,12 @@ class AssistantBrain(private val context: Context) {
         }
         val CANDIDATE_MODELS = listOf(
             "gemini-flash-lite-latest",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3-flash-preview"
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-latest",
+            "gemini-2.5-flash",
+            "gemini-1.5-pro"
         )
     }
 
@@ -167,7 +169,7 @@ class AssistantBrain(private val context: Context) {
             USER INPUT: "$command"
         """.trimIndent()
 
-        val jsonBody = JsonObject().apply {
+        val jsonBodyWithTools = JsonObject().apply {
             val contents = JsonArray()
             val contentObj = JsonObject()
             val parts = JsonArray()
@@ -186,15 +188,37 @@ class AssistantBrain(private val context: Context) {
             add("tools", tools)
         }
 
+        val jsonBodyWithoutTools = JsonObject().apply {
+            val contents = JsonArray()
+            val contentObj = JsonObject()
+            val parts = JsonArray()
+            val partObj = JsonObject()
+            partObj.addProperty("text", systemInstruction)
+            parts.add(partObj)
+            contentObj.add("parts", parts)
+            contents.add(contentObj)
+            add("contents", contents)
+        }
+
         for (model in CANDIDATE_MODELS) {
             try {
                 val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$effectiveKey&alt=sse"
-                val request = Request.Builder()
+                var request = Request.Builder()
                     .url(url)
-                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .post(jsonBodyWithTools.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = httpClient.newCall(request).execute()
+                var response = httpClient.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    response.close()
+                    // Fallback attempt without search tool
+                    request = Request.Builder()
+                        .url(url)
+                        .post(jsonBodyWithoutTools.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    response = httpClient.newCall(request).execute()
+                }
+
                 if (response.isSuccessful) {
                     val stream = response.body?.byteStream()
                     if (stream != null) {
@@ -210,12 +234,21 @@ class AssistantBrain(private val context: Context) {
         for (model in CANDIDATE_MODELS) {
             try {
                 val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$effectiveKey"
-                val request = Request.Builder()
+                var request = Request.Builder()
                     .url(url)
-                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .post(jsonBodyWithTools.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = httpClient.newCall(request).execute()
+                var response = httpClient.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    response.close()
+                    request = Request.Builder()
+                        .url(url)
+                        .post(jsonBodyWithoutTools.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    response = httpClient.newCall(request).execute()
+                }
+
                 if (response.isSuccessful) {
                     val bodyStr = response.body?.string() ?: ""
                     val root = gson.fromJson(bodyStr, JsonObject::class.java)
@@ -387,7 +420,9 @@ class AssistantBrain(private val context: Context) {
             throw java.io.IOException("Empty SSE response stream")
         }
         val actionsList = extractActionsFromText(fullText)
-        val finalSpeech = speechBuilder.toString().trim().ifBlank { fullText }
+        val finalSpeech = speechBuilder.toString().trim().ifBlank { 
+            fullText.substringBefore("[ACTIONS:").trim() 
+        }
 
         return Pair(finalSpeech, actionsList)
     }

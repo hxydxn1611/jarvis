@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private var ambientRecognizer: SpeechRecognizer? = null
     private var isAmbientListening = false
     private var isProcessingCommand = false
+    private var activeTurnId = 0L
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.RECORD_AUDIO,
@@ -199,11 +200,17 @@ class MainActivity : AppCompatActivity() {
     private fun setupInteractions() {
         // Tap on Center Living Core to talk
         binding.coreContainer.setOnClickListener {
+            isProcessingCommand = false
+            VoiceManager.stopSpeaking()
+            VoiceManager.resetSpeechTurn()
             triggerVoiceListening()
         }
 
         // Tap on Mic FAB
         binding.fabVoice.setOnClickListener {
+            isProcessingCommand = false
+            VoiceManager.stopSpeaking()
+            VoiceManager.resetSpeechTurn()
             triggerVoiceListening()
         }
 
@@ -436,9 +443,9 @@ class MainActivity : AppCompatActivity() {
                 acknowledgeWake()
             }
         } else {
-            // Check if user spoke a direct command while viewing the active dashboard
-            val bestCandidate = matches.firstOrNull { it.isNotBlank() }?.trim() ?: ""
-            if (bestCandidate.isNotBlank() && isLikelyDirectCommand(bestCandidate)) {
+            // Any natural English speech spoken while dashboard is active
+            val bestCandidate = matches.firstOrNull { it.trim().length >= 2 }?.trim() ?: ""
+            if (bestCandidate.isNotBlank()) {
                 stopAmbientWakeWordListener()
                 handleUserInput(bestCandidate)
             } else {
@@ -448,17 +455,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    private fun isLikelyDirectCommand(text: String): Boolean {
-        val lower = text.lowercase().trim()
-        val directKeywords = listOf(
-            "open ", "launch ", "start ", "turn on", "turn off", "flashlight", "torch",
-            "call ", "dial ", "play ", "volume ", "set alarm", "send ", "search ",
-            "what", "who", "where", "how", "why", "when", "can you", "could you",
-            "explain", "calculate", "solve", "status", "diagnostics", "help", "hello", "hi"
-        )
-        return directKeywords.any { lower.startsWith(it) || lower.contains(it) }
     }
 
     private fun acknowledgeWake() {
@@ -641,18 +637,19 @@ class MainActivity : AppCompatActivity() {
             val resolved = resolvePackageForApp(appName)
             if (resolved != null) {
                 launchApp(resolved.first, resolved.second)
-            } else {
-                speakAndDisplay("I could not locate an application named '$appName' on this device, Sir.")
+                return true
             }
-            return true
+            // If not a directly resolved local app, fall through to central AI reasoning
         }
 
         // 3. Make Phone Calls
         if (lower.startsWith("call ") || lower.startsWith("make a call to ") || lower.startsWith("dial ")) {
             val target = lower.removePrefix("make a call to ").removePrefix("call ").removePrefix("dial ").trim()
-            speakAndDisplay("Initiating call to $target, Sir.")
-            DeviceManager(this).makeCall(target)
-            return true
+            if (target.isNotBlank()) {
+                speakAndDisplay("Initiating call to $target, Sir.")
+                DeviceManager(this).makeCall(target)
+                return true
+            }
         }
 
         // 4. Play YouTube / Music
@@ -1106,6 +1103,23 @@ class MainActivity : AppCompatActivity() {
 
         stopAmbientWakeWordListener()
         isProcessingCommand = true
+
+        val currentTurn = System.currentTimeMillis()
+        activeTurnId = currentTurn
+        scope.launch {
+            delay(14000)
+            if (activeTurnId == currentTurn && isProcessingCommand) {
+                Log.w(TAG, "Turn watchdog triggered - recovering standby state")
+                runOnUiThread {
+                    isProcessingCommand = false
+                    setCoreActive(false)
+                    binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
+                    if (isHandsFreeEnabled) {
+                        startAmbientWakeWordListener()
+                    }
+                }
+            }
+        }
 
         binding.tvTranscript.text = "You: $cleanInput\n\nJarvis: "
         binding.tvCoreState.text = "PROCESSING..."

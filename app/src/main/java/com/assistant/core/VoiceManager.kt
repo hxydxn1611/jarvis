@@ -26,6 +26,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
         private set
 
     private var hasStartedSpeakingCurrentTurn = false
+    private var lastQueuedUtteranceId: String? = null
     private val speechCallbacks = ConcurrentHashMap<String, () -> Unit>()
     private var turnCompletionCallback: (() -> Unit)? = null
 
@@ -74,12 +75,14 @@ object VoiceManager : TextToSpeech.OnInitListener {
                 val femaleBlacklist = listOf(
                     "female", "woman", "girl", "gba", "gbc", "gbe", 
                     "sfa", "sfc", "sfe", "ioa", "ioc", "ioe", 
-                    "_f0", "-f0", "#female", "zira", "eva", "victoria"
+                    "_f0", "-f0", "#female", "zira", "eva", "victoria", "fis", "f0"
                 )
 
                 val maleWhitelist = listOf(
                     "rjs", "gbb", "gbd", "sfb", "sfd", "iom", "iol",
-                    "male", "man", "#male", "_m0", "-m0", "voice 2", "voice 4"
+                    "male", "man", "#male", "_m0", "-m0", "_m", "-m",
+                    "en-gb-x-rjs", "en-gb-x-gbd", "wavenet-b", "wavenet-d", 
+                    "standard-b", "standard-d", "b-local", "d-local"
                 )
 
                 // 1. UK Male Voice (Highest Priority - True British Jarvis)
@@ -117,8 +120,8 @@ object VoiceManager : TextToSpeech.OnInitListener {
             }
         }
 
-        // Deep baritone British pitch (0.70f) and natural speech tempo
-        tts?.setPitch(0.70f)
+        // Deep baritone British pitch (0.68f) and natural speech tempo
+        tts?.setPitch(0.68f)
         tts?.setSpeechRate(0.98f)
     }
 
@@ -134,7 +137,8 @@ object VoiceManager : TextToSpeech.OnInitListener {
                     cb?.invoke()
                 }
 
-                if (speechCallbacks.isEmpty() && tts?.isSpeaking != true) {
+                val isLast = utteranceId != null && utteranceId == lastQueuedUtteranceId
+                if (isLast || (speechCallbacks.isEmpty() && tts?.isSpeaking != true)) {
                     isSpeaking = false
                     val finalCb = turnCompletionCallback
                     turnCompletionCallback = null
@@ -164,6 +168,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
         hasStartedSpeakingCurrentTurn = false
         speechCallbacks.clear()
         turnCompletionCallback = null
+        lastQueuedUtteranceId = null
         stopSpeaking()
     }
 
@@ -171,10 +176,11 @@ object VoiceManager : TextToSpeech.OnInitListener {
         if (!isTtsReady || sentence.isBlank()) return
         val clean = sentence.trim()
 
-        tts?.setPitch(0.70f)
+        tts?.setPitch(0.68f)
         tts?.setSpeechRate(0.98f)
 
         val utteranceId = "STREAM_${System.currentTimeMillis()}_${clean.hashCode()}"
+        lastQueuedUtteranceId = utteranceId
         if (!hasStartedSpeakingCurrentTurn) {
             // First chunk: Flush any previous audio and play immediately (<400ms)
             tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
@@ -187,9 +193,10 @@ object VoiceManager : TextToSpeech.OnInitListener {
 
     fun speak(text: String, onDone: (() -> Unit)? = null) {
         if (isTtsReady && text.isNotBlank()) {
-            tts?.setPitch(0.70f)
+            tts?.setPitch(0.68f)
             tts?.setSpeechRate(0.98f)
             val utteranceId = "UTTER_${System.currentTimeMillis()}"
+            lastQueuedUtteranceId = utteranceId
             if (onDone != null) {
                 speechCallbacks[utteranceId] = onDone
             }
