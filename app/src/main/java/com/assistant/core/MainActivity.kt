@@ -24,6 +24,7 @@ import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -98,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
         brain = AssistantBrain(this)
         VoiceManager.init(this)
+        SmartTvManager.loadSavedTv(this)?.let { SmartTvManager.setActiveTv(it) }
         SmartTvManager.scanLocalNetwork(this)
 
         startCoreAnimation()
@@ -110,6 +112,10 @@ class MainActivity : AppCompatActivity() {
             intent?.removeExtra("AUTO_LISTEN")
             triggerVoiceListening()
         }
+        if (intent?.getBooleanExtra("SHOW_TV_REMOTE", false) == true) {
+            intent?.removeExtra("SHOW_TV_REMOTE")
+            showTvRemoteDialog()
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -118,6 +124,10 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra("AUTO_LISTEN", false) == true) {
             intent?.removeExtra("AUTO_LISTEN")
             triggerVoiceListening()
+        }
+        if (intent?.getBooleanExtra("SHOW_TV_REMOTE", false) == true) {
+            intent?.removeExtra("SHOW_TV_REMOTE")
+            showTvRemoteDialog()
         }
     }
 
@@ -244,7 +254,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.chipSmartTv.setOnClickListener {
-            triggerSmartTvScan()
+            if (SmartTvManager.discoveredTvs.isNotEmpty()) {
+                showTvRemoteDialog(SmartTvManager.discoveredTvs)
+            } else {
+                triggerSmartTvScan(autoShowDialog = true)
+            }
         }
         binding.chipDiagnostics.setOnClickListener {
             executeDiagnosticsProtocol()
@@ -739,39 +753,66 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 7. Wireless Smart TV Jump & Casting (DIAL, Samsung Tizen, Roku, DLNA)
-        if (lower.startsWith("cast ") || lower.contains("on tv") || lower.contains("to tv") || lower.startsWith("play on tv")) {
-            var query = lower.removePrefix("cast ").removePrefix("play on tv").removePrefix("play ")
-            query = query.replace("to tv", "").replace("on tv", "").replace("to my tv", "").replace("on my tv", "").trim()
+        // 7. Wireless Smart TV Jump & Casting (DIAL, Samsung Tizen, Roku, DLNA, Smart View)
+        if (lower.contains("tv remote") || lower.contains("control tv") || lower == "tv" || lower == "smart tv" || lower.contains("open tv remote") || lower.contains("show tv remote") || lower.contains("open tv")) {
+            speakAndDisplay("Opening Smart TV control console, Sir.")
+            showTvRemoteDialog()
+            return true
+        }
+
+        if (lower.contains("smart view") || lower.contains("screen mirror") || lower.contains("mirror screen") || lower.contains("mirror to tv") || lower.contains("cast screen")) {
+            speakAndDisplay("Initiating Smart View screen mirroring, Sir.")
+            SmartTvManager.launchScreenMirroring(this)
+            return true
+        }
+
+        if (lower.startsWith("cast ") || lower.contains("on tv") || lower.contains("to tv") || lower.startsWith("play on tv") || lower.contains("launch youtube on tv") || lower.contains("open youtube on tv")) {
+            var query = lower.removePrefix("cast ").removePrefix("play on tv").removePrefix("play ").removePrefix("launch ").removePrefix("open ")
+            query = query.replace("youtube on tv", "").replace("to tv", "").replace("on tv", "").replace("to my tv", "").replace("on my tv", "").trim()
             val targetIp = SmartTvManager.activeTv?.ip ?: ""
             val tvName = SmartTvManager.activeTv?.name ?: "Smart TV"
-            speakAndDisplay("Broadcasting '$query' to $tvName, Sir.")
+            speakAndDisplay(if (query.isNotBlank()) "Broadcasting '$query' to $tvName, Sir." else "Launching YouTube on $tvName, Sir.")
             SmartTvManager.castToTv(targetIp, query) { success, feedback ->
                 Log.i(TAG, feedback)
+                if (!success && SmartTvManager.activeTv == null) {
+                    showTvRemoteDialog()
+                }
             }
             return true
         }
 
-        if (lower.contains("tv volume up") || lower.contains("increase tv volume") || lower.contains("raise tv volume")) {
+        if (lower.contains("tv volume up") || lower.contains("volume up on tv") || lower.contains("increase tv volume") || lower.contains("raise tv volume")) {
             val tvIp = SmartTvManager.activeTv?.ip ?: ""
             SmartTvManager.sendTvKey(tvIp, "VOL_UP") { _, msg -> speakAndDisplay(msg) }
             return true
         }
 
-        if (lower.contains("tv volume down") || lower.contains("decrease tv volume") || lower.contains("lower tv volume")) {
+        if (lower.contains("tv volume down") || lower.contains("volume down on tv") || lower.contains("decrease tv volume") || lower.contains("lower tv volume")) {
             val tvIp = SmartTvManager.activeTv?.ip ?: ""
             SmartTvManager.sendTvKey(tvIp, "VOL_DOWN") { _, msg -> speakAndDisplay(msg) }
             return true
         }
 
-        if (lower.contains("mute tv")) {
+        if (lower.contains("mute tv") || lower.contains("mute the tv") || (lower.contains("mute") && lower.contains("tv"))) {
             val tvIp = SmartTvManager.activeTv?.ip ?: ""
             SmartTvManager.sendTvKey(tvIp, "MUTE") { _, msg -> speakAndDisplay(msg) }
             return true
         }
 
+        if (lower.contains("tv home") || lower.contains("home on tv") || lower.contains("tv menu")) {
+            val tvIp = SmartTvManager.activeTv?.ip ?: ""
+            SmartTvManager.sendTvKey(tvIp, "HOME") { _, msg -> speakAndDisplay(msg) }
+            return true
+        }
+
+        if (lower.contains("tv power") || lower.contains("power off tv") || lower.contains("turn off tv") || lower.contains("turn on tv")) {
+            val tvIp = SmartTvManager.activeTv?.ip ?: ""
+            SmartTvManager.sendTvKey(tvIp, "POWER") { _, msg -> speakAndDisplay(msg) }
+            return true
+        }
+
         if (lower.contains("scan wifi") || lower.contains("scan network") || lower.contains("find tv") || lower.contains("find my tv")) {
-            triggerSmartTvScan()
+            triggerSmartTvScan(autoShowDialog = true)
             return true
         }
 
@@ -948,7 +989,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 ActionType.SCAN_WIFI -> {
-                    triggerSmartTvScan()
+                    triggerSmartTvScan(autoShowDialog = true)
+                }
+                ActionType.SHOW_TV_REMOTE -> {
+                    showTvRemoteDialog()
+                }
+                ActionType.SMART_VIEW -> {
+                    SmartTvManager.launchScreenMirroring(this)
                 }
                 ActionType.SET_ALARM -> {
                     val hour = action.target?.toIntOrNull() ?: 7
@@ -963,7 +1010,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun triggerSmartTvScan() {
+    private fun triggerSmartTvScan(autoShowDialog: Boolean = true) {
         stopAmbientWakeWordListener()
         isProcessingCommand = true
         binding.tvCoreState.text = "SCANNING WIFI MESH..."
@@ -974,13 +1021,16 @@ class MainActivity : AppCompatActivity() {
             val count = tvs.size
             val rep = if (count > 0) {
                 val listStr = tvs.joinToString("\n") { "• ${it.name} [${it.ip}] (${it.protocol})" }
-                "Jarvis: Wireless mesh active on SSID '$ssid' ($ip).\nDiscovered $count Smart TV device(s):\n$listStr\n\nYou can say 'Cast [video] to TV' or 'Turn up TV volume'."
+                "Jarvis: Wireless mesh active on SSID '$ssid' ($ip).\nDiscovered $count Smart TV device(s):\n$listStr\n\nTap controls on the TV HUD or speak TV commands."
             } else {
                 "Jarvis: Wireless mesh active on SSID '$ssid' ($ip).\nNo Smart TVs detected via SSDP/DIAL on this subnet. Ensure your TV is powered on and connected to '$ssid'."
             }
-            speakAndDisplay(if (count > 0) "Wireless mesh established with $count Smart TV device(s), Sir." else "WiFi scan complete. No active Smart TVs detected on $ssid, Sir.")
+            speakAndDisplay(if (count > 0) "Wireless mesh established with $count Smart TV device(s), Sir. Control console deployed." else "WiFi scan complete. No active Smart TVs detected on $ssid, Sir.")
             runOnUiThread {
                 binding.tvTranscript.text = rep
+                if (autoShowDialog) {
+                    showTvRemoteDialog(tvs)
+                }
             }
         }
     }
@@ -1226,6 +1276,119 @@ class MainActivity : AppCompatActivity() {
             binding.viewCoreGlow.alpha = 1.0f
         } else {
             binding.viewCoreGlow.alpha = 0.7f
+        }
+    }
+
+    private var activeTvRemoteDialog: BottomSheetDialog? = null
+
+    private fun showTvRemoteDialog(tvs: List<DiscoveredTv> = SmartTvManager.discoveredTvs) {
+        runOnUiThread {
+            try {
+                if (activeTvRemoteDialog?.isShowing == true) {
+                    activeTvRemoteDialog?.dismiss()
+                }
+
+                val dialog = BottomSheetDialog(this)
+                activeTvRemoteDialog = dialog
+                val view = layoutInflater.inflate(R.layout.dialog_tv_remote, null)
+                dialog.setContentView(view)
+
+                val tvStatus = view.findViewById<TextView>(R.id.tv_dialog_tv_status)
+                val tvName = view.findViewById<TextView>(R.id.tv_dialog_tv_name)
+                val tvIp = view.findViewById<TextView>(R.id.tv_dialog_tv_ip)
+                val btnLaunchYt = view.findViewById<MaterialButton>(R.id.btn_tv_launch_yt)
+                val btnVolUp = view.findViewById<MaterialButton>(R.id.btn_tv_vol_up)
+                val btnVolDown = view.findViewById<MaterialButton>(R.id.btn_tv_vol_down)
+                val btnMute = view.findViewById<MaterialButton>(R.id.btn_tv_mute)
+                val btnHome = view.findViewById<MaterialButton>(R.id.btn_tv_home)
+                val btnPower = view.findViewById<MaterialButton>(R.id.btn_tv_power)
+                val btnSmartView = view.findViewById<MaterialButton>(R.id.btn_tv_smart_view)
+                val btnRescan = view.findViewById<MaterialButton>(R.id.btn_tv_rescan)
+
+                fun refreshHeader(targetTvs: List<DiscoveredTv>) {
+                    val currentTv = SmartTvManager.activeTv ?: targetTvs.firstOrNull()
+                    if (currentTv != null) {
+                        tvName.text = "📺 ${currentTv.name}"
+                        tvIp.text = "IP: ${currentTv.ip} • Protocol: ${currentTv.protocol.name}"
+                        tvStatus.text = "🟢 Active Smart TV Linked (${targetTvs.size} display detected)"
+                    } else {
+                        val (ssid, ip) = SmartTvManager.getWifiInfo(this)
+                        tvName.text = "📡 WiFi Mesh: $ssid"
+                        tvIp.text = "Local IP: $ip (No TV locked)"
+                        tvStatus.text = "Scanning subnet for Smart TVs & Cast displays..."
+                    }
+                }
+
+                refreshHeader(tvs)
+
+                btnLaunchYt.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val targetIp = SmartTvManager.activeTv?.ip ?: tvs.firstOrNull()?.ip ?: ""
+                    SmartTvManager.castToTv(targetIp, "") { success, msg ->
+                        speakAndDisplay(msg)
+                        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                btnVolUp.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val targetIp = SmartTvManager.activeTv?.ip ?: tvs.firstOrNull()?.ip ?: ""
+                    SmartTvManager.sendTvKey(targetIp, "VOL_UP") { _, msg ->
+                        Toast.makeText(this, "TV Volume +", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                btnVolDown.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val targetIp = SmartTvManager.activeTv?.ip ?: tvs.firstOrNull()?.ip ?: ""
+                    SmartTvManager.sendTvKey(targetIp, "VOL_DOWN") { _, msg ->
+                        Toast.makeText(this, "TV Volume -", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                btnMute.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val targetIp = SmartTvManager.activeTv?.ip ?: tvs.firstOrNull()?.ip ?: ""
+                    SmartTvManager.sendTvKey(targetIp, "MUTE") { _, msg ->
+                        Toast.makeText(this, "TV Mute Toggled", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                btnHome.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val targetIp = SmartTvManager.activeTv?.ip ?: tvs.firstOrNull()?.ip ?: ""
+                    SmartTvManager.sendTvKey(targetIp, "HOME") { _, msg ->
+                        Toast.makeText(this, "TV Home Signal Dispatched", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                btnPower.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val targetIp = SmartTvManager.activeTv?.ip ?: tvs.firstOrNull()?.ip ?: ""
+                    SmartTvManager.sendTvKey(targetIp, "POWER") { _, msg ->
+                        Toast.makeText(this, "TV Power Dispatched", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                btnSmartView.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    SmartTvManager.launchScreenMirroring(this)
+                    Toast.makeText(this, "Launching Smart View & Screen Mirroring...", Toast.LENGTH_SHORT).show()
+                }
+
+                btnRescan.setOnClickListener {
+                    SoundEffectManager.playWakeChime()
+                    tvStatus.text = "Rescanning subnet for Smart TVs..."
+                    SmartTvManager.scanLocalNetwork(this) { updatedTvs ->
+                        refreshHeader(updatedTvs)
+                        Toast.makeText(this, "Discovered ${updatedTvs.size} Smart TV(s)", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                dialog.show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error showing TV remote dialog", e)
+            }
         }
     }
 

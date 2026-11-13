@@ -147,6 +147,8 @@ class AssistantBrain(private val context: Context) {
             - CAST_TO_TV (target: video title or query, value: optional tv IP)
             - CONTROL_TV (value: "VOL_UP" | "VOL_DOWN" | "MUTE" | "HOME" | "POWER")
             - SCAN_WIFI
+            - SHOW_TV_REMOTE
+            - SMART_VIEW
             - SET_ALARM (target: hour, value: minute, extra: label)
             - PLAY_SPOTIFY (target: song or artist)
             - FLASHLIGHT_TOGGLE (value: "true" or "false")
@@ -163,6 +165,8 @@ class AssistantBrain(private val context: Context) {
             SPECIAL BEHAVIORS:
             - If user asks to check, read, or summarize their emails or mail, inspect 'Recent Incoming Emails'. If emails exist, summarize them clearly (e.g. 'Sir, you have an email from [Sender] regarding [Subject]'). If none are found, announce that no new email alerts have arrived and offer to open Gmail with OPEN_APP (target: com.google.android.gm).
             - If user asks to send WhatsApp message to someone, generate SEND_WHATSAPP action with contact and text.
+            - If user asks to open TV remote, control the TV, or show TV controls, generate SHOW_TV_REMOTE action.
+            - If user asks to mirror screen to TV, screen mirror, or launch Smart View, generate SMART_VIEW action.
             - If user asks to play a video on TV, cast to TV, or jump to TV, generate CAST_TO_TV action.
             - If user asks to control TV volume or power, generate CONTROL_TV action.
             - If user asks to scan WiFi or find devices/TVs, generate SCAN_WIFI action.

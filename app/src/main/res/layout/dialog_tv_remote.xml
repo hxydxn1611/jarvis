@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#0F1424"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:background="#3300E5FF"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="STARK WIRELESS DISPLAY MESH"
+        android:textColor="#00E5FF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:letterSpacing="0.1" />
+
+    <TextView
+        android:id="@+id/tv_dialog_tv_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Scanning local WiFi for Smart Displays..."
+        android:textColor="#81D4FA"
+        android:textSize="13sp"
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Discovered TV Banner -->
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="#1A00E5FF"
+        app:strokeColor="#00E5FF"
+        app:strokeWidth="1dp"
+        app:cardCornerRadius="12dp"
+        android:layout_marginBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:id="@+id/tv_dialog_tv_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📺 Living Room Smart TV"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/tv_dialog_tv_ip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="IP: Probing subnet..."
+                android:textColor="#00E5FF"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- TV Action Buttons Grid -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_tv_launch_yt"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:text="▶️ LAUNCH YOUTUBE ON TV"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        app:backgroundTint="#00E5FF"
+        app:cornerRadius="10dp"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Volume & Controls Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="10dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tv_vol_up"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="🔊 VOL +"
+            android:textColor="#00E5FF"
+            app:backgroundTint="#1F2A48"
+            app:strokeColor="#00E5FF"
+            app:strokeWidth="1dp"
+            app:cornerRadius="10dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tv_vol_down"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
+            android:text="🔉 VOL -"
+            android:textColor="#00E5FF"
+            app:backgroundTint="#1F2A48"
+            app:strokeColor="#00E5FF"
+            app:strokeWidth="1dp"
+            app:cornerRadius="10dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tv_mute"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="🔇 MUTE"
+            android:textColor="#00E5FF"
+            app:backgroundTint="#1F2A48"
+            app:strokeColor="#00E5FF"
+            app:strokeWidth="1dp"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+    <!-- Secondary Row: Power, Home, Smart View -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="10dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tv_home"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="🏠 HOME"
+            android:textColor="#81D4FA"
+            app:backgroundTint="#151D33"
+            app:cornerRadius="10dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tv_power"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="⚡ POWER"
+            android:textColor="#FF5252"
+            app:backgroundTint="#151D33"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_tv_smart_view"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:text="📱 SMART VIEW / SCREEN MIRROR"
+        android:textColor="#81D4FA"
+        app:backgroundTint="#1F2A48"
+        app:cornerRadius="10dp"
+        android:layout_marginBottom="8dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_tv_rescan"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:text="🔄 RESCAN WIFI MESH"
+        android:textColor="#4DD0E1"
+        android:textSize="12sp"
+        style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+</LinearLayout>

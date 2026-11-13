@@ -1,21 +1,28 @@
 package com.assistant.core
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -55,6 +62,71 @@ object SmartTvManager {
     @Volatile
     var activeTv: DiscoveredTv? = null
         private set
+
+    fun setActiveTv(tv: DiscoveredTv) {
+        activeTv = tv
+        if (discoveredTvs.none { it.ip == tv.ip }) {
+            discoveredTvs.add(0, tv)
+        }
+    }
+
+    fun saveTvToPrefs(context: Context, tv: DiscoveredTv) {
+        try {
+            val prefs = context.getSharedPreferences("SmartTvPrefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("tv_name", tv.name)
+                .putString("tv_ip", tv.ip)
+                .putString("tv_protocol", tv.protocol.name)
+                .putInt("tv_port", tv.port)
+                .apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error saving TV to prefs", e)
+        }
+    }
+
+    fun loadSavedTv(context: Context): DiscoveredTv? {
+        return try {
+            val prefs = context.getSharedPreferences("SmartTvPrefs", Context.MODE_PRIVATE)
+            val ip = prefs.getString("tv_ip", null) ?: return null
+            val name = prefs.getString("tv_name", "Saved Smart TV") ?: "Saved Smart TV"
+            val protoStr = prefs.getString("tv_protocol", TvProtocol.DIAL_CAST.name) ?: TvProtocol.DIAL_CAST.name
+            val proto = try { TvProtocol.valueOf(protoStr) } catch (e: Exception) { TvProtocol.DIAL_CAST }
+            val port = prefs.getInt("tv_port", 8008)
+            DiscoveredTv(name, ip, proto, port)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Launches Samsung Smart View or standard Android Wireless Display / Cast Settings
+     */
+    fun launchScreenMirroring(context: Context) {
+        val candidates = listOf(
+            // 1. Samsung Smart View native activity (One UI)
+            Intent().setClassName("com.samsung.android.smartmirroring", "com.samsung.android.smartmirroring.MainActivity"),
+            // 2. Android Standard Cast Settings (opens Smart View on Samsung)
+            Intent(Settings.ACTION_CAST_SETTINGS),
+            // 3. Samsung WFD picker
+            Intent("android.intent.action.VIEW").apply {
+                setClassName("com.android.settings", "com.android.settings.wfd.WifiDisplaySettings")
+            },
+            // 4. Generic WiFi Display
+            Intent("android.settings.WIFI_DISPLAY_SETTINGS")
+        )
+        for (intent in candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                return
+            } catch (e: Exception) {}
+        }
+        try {
+            context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (e: Exception) {}
+    }
 
     /**
      * Retrieves current connected WiFi SSID and local IP
@@ -120,8 +192,11 @@ object SmartTvManager {
             }
 
             discoveredTvs = found
-            if (found.isNotEmpty() && activeTv == null) {
-                activeTv = found.first()
+            if (found.isNotEmpty()) {
+                if (activeTv == null || found.none { it.ip == activeTv?.ip }) {
+                    activeTv = found.first()
+                }
+                saveTvToPrefs(context, activeTv ?: found.first())
             }
 
             withContext(Dispatchers.Main) {
@@ -304,6 +379,42 @@ object SmartTvManager {
     }
 
     /**
+     * Sends key command via WebSocket for modern Samsung Tizen TVs (2016+)
+     */
+    private fun sendSamsungWebSocketKey(ip: String, keyCommand: String) {
+        try {
+            val appNameBase64 = Base64.encodeToString("Jarvis".toByteArray(), Base64.NO_WRAP)
+            val wsUrl = "ws://$ip:8001/api/v2/channels/samsung.remote.control?name=$appNameBase64"
+            val request = Request.Builder().url(wsUrl).build()
+
+            httpClient.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    val payload = JSONObject().apply {
+                        put("method", "ms.remote.control")
+                        put("params", JSONObject().apply {
+                            put("Cmd", "Click")
+                            put("DataOfCmd", keyCommand)
+                            put("Option", "false")
+                            put("TypeOfRemote", "SendRemoteKey")
+                        })
+                    }
+                    webSocket.send(payload.toString())
+                    scope.launch {
+                        delay(250)
+                        webSocket.close(1000, "Done")
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    Log.w(TAG, "Samsung WebSocket failed: ${t.message}")
+                }
+            })
+        } catch (e: Exception) {
+            Log.w(TAG, "Error initiating Samsung WebSocket", e)
+        }
+    }
+
+    /**
      * Launches YouTube or media query directly onto the Smart TV
      */
     fun castToTv(
@@ -312,48 +423,67 @@ object SmartTvManager {
         onComplete: (Boolean, String) -> Unit
     ) {
         scope.launch {
-            val tv = discoveredTvs.firstOrNull { it.ip == tvIp } ?: activeTv ?: DiscoveredTv("Living Room TV", tvIp, TvProtocol.DIAL_CAST)
+            val tv = when {
+                tvIp.isNotBlank() -> discoveredTvs.firstOrNull { it.ip == tvIp } ?: DiscoveredTv("Smart TV", tvIp, TvProtocol.DIAL_CAST)
+                activeTv != null -> activeTv
+                discoveredTvs.isNotEmpty() -> discoveredTvs.first()
+                else -> null
+            }
+
+            if (tv == null || tv.ip.isBlank()) {
+                withContext(Dispatchers.Main) {
+                    onComplete(false, "No active Smart TV locked. Opening Smart View screen mirror...")
+                }
+                return@launch
+            }
 
             try {
                 when (tv.protocol) {
                     TvProtocol.DIAL_CAST -> {
-                        // DIAL protocol: Launch YouTube with video/search query
-                        val cleanQuery = java.net.URLEncoder.encode(query, "UTF-8")
                         val url = "http://${tv.ip}:8008/apps/YouTube"
-                        val body = "v=$cleanQuery".toRequestBody("application/x-www-form-urlencoded".toMediaType())
+                        val body = if (query.isNotBlank() && query.length == 11 && !query.contains(" ")) {
+                            "v=$query".toRequestBody("application/x-www-form-urlencoded".toMediaType())
+                        } else if (query.isNotBlank()) {
+                            val cleanQuery = java.net.URLEncoder.encode(query, "UTF-8")
+                            "v=$cleanQuery".toRequestBody("application/x-www-form-urlencoded".toMediaType())
+                        } else {
+                            "".toRequestBody(null)
+                        }
 
-                        val request = Request.Builder()
-                            .url(url)
-                            .post(body)
-                            .build()
-
+                        val request = Request.Builder().url(url).post(body).build()
                         val resp = httpClient.newCall(request).execute()
                         if (resp.isSuccessful || resp.code in 200..299 || resp.code == 303) {
                             withContext(Dispatchers.Main) {
-                                onComplete(true, "Transmitting '$query' directly to ${tv.name}, Sir.")
+                                onComplete(true, if (query.isNotBlank()) "Transmitting '$query' to ${tv.name}, Sir." else "Launched YouTube on ${tv.name}, Sir.")
                             }
                             return@launch
                         }
                     }
                     TvProtocol.ROKU_ECP -> {
                         val cleanQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                        val url = "http://${tv.ip}:8060/launch/837?contentId=$cleanQuery"
+                        val url = if (query.isNotBlank()) "http://${tv.ip}:8060/launch/837?contentId=$cleanQuery" else "http://${tv.ip}:8060/launch/837"
                         val request = Request.Builder().url(url).post("".toRequestBody(null)).build()
                         httpClient.newCall(request).execute()
                         withContext(Dispatchers.Main) {
-                            onComplete(true, "Queued '$query' on ${tv.name}, Sir.")
+                            onComplete(true, if (query.isNotBlank()) "Queued '$query' on ${tv.name}, Sir." else "Launched YouTube on ${tv.name}, Sir.")
                         }
                         return@launch
                     }
                     TvProtocol.SAMSUNG_API -> {
-                        // Launch YouTube app on Samsung Tizen OS
-                        val url = "http://${tv.ip}:8001/api/v2/applications/111299001912"
-                        val request = Request.Builder().url(url).post("".toRequestBody(null)).build()
-                        httpClient.newCall(request).execute()
-                        withContext(Dispatchers.Main) {
-                            onComplete(true, "Broadcasting '$query' on ${tv.name}, Sir.")
+                        // Launch YouTube app on Samsung Tizen OS (App ID 111299001912)
+                        try {
+                            val url = "http://${tv.ip}:8001/api/v2/applications/111299001912"
+                            val request = Request.Builder().url(url).post("".toRequestBody(null)).build()
+                            val resp = httpClient.newCall(request).execute()
+                            if (resp.isSuccessful || resp.code in 200..299) {
+                                withContext(Dispatchers.Main) {
+                                    onComplete(true, if (query.isNotBlank()) "Broadcasting '$query' on ${tv.name}, Sir." else "Launched YouTube on ${tv.name}, Sir.")
+                                }
+                                return@launch
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Samsung REST launch failed, trying DIAL fallback", e)
                         }
-                        return@launch
                     }
                     else -> {}
                 }
@@ -384,7 +514,19 @@ object SmartTvManager {
         onComplete: (Boolean, String) -> Unit
     ) {
         scope.launch {
-            val tv = discoveredTvs.firstOrNull { it.ip == tvIp } ?: activeTv ?: DiscoveredTv("Smart TV", tvIp, TvProtocol.DIAL_CAST)
+            val tv = when {
+                tvIp.isNotBlank() -> discoveredTvs.firstOrNull { it.ip == tvIp } ?: DiscoveredTv("Smart TV", tvIp, TvProtocol.DIAL_CAST)
+                activeTv != null -> activeTv
+                discoveredTvs.isNotEmpty() -> discoveredTvs.first()
+                else -> null
+            }
+
+            if (tv == null || tv.ip.isBlank()) {
+                withContext(Dispatchers.Main) {
+                    onComplete(false, "No active Smart TV locked. Scan WiFi mesh first, Sir.")
+                }
+                return@launch
+            }
 
             try {
                 if (tv.protocol == TvProtocol.ROKU_ECP) {
@@ -405,21 +547,27 @@ object SmartTvManager {
                     return@launch
                 }
 
+                val samsungKey = when (action.uppercase()) {
+                    "VOL_UP", "VOLUME_UP" -> "KEY_VOLUP"
+                    "VOL_DOWN", "VOLUME_DOWN" -> "KEY_VOLDOWN"
+                    "MUTE" -> "KEY_MUTE"
+                    "HOME" -> "KEY_HOME"
+                    "POWER" -> "KEY_POWER"
+                    else -> "KEY_VOLUP"
+                }
+
                 if (tv.protocol == TvProtocol.SAMSUNG_API) {
-                    val keyCommand = when (action.uppercase()) {
-                        "VOL_UP", "VOLUME_UP" -> "KEY_VOLUP"
-                        "VOL_DOWN", "VOLUME_DOWN" -> "KEY_VOLDOWN"
-                        "MUTE" -> "KEY_MUTE"
-                        "HOME" -> "KEY_HOME"
-                        "POWER" -> "KEY_POWER"
-                        else -> "KEY_VOLUP"
-                    }
-                    // Samsung Key dispatch
-                    val url = "http://${tv.ip}:8001/api/v2/channels/samsung.remote.control"
-                    val body = """{"method":"ms.remote.control","params":{"Cmd":"Click","DataOfCmd":"$keyCommand","Option":"false","TypeOfRemote":"SendRemoteKey"}}"""
-                        .toRequestBody("application/json".toMediaType())
-                    val req = Request.Builder().url(url).post(body).build()
-                    httpClient.newCall(req).execute()
+                    // 1. Modern WebSocket Key dispatch (Tizen 2016+)
+                    sendSamsungWebSocketKey(tv.ip, samsungKey)
+
+                    // 2. HTTP POST fallback
+                    try {
+                        val url = "http://${tv.ip}:8001/api/v2/channels/samsung.remote.control"
+                        val body = """{"method":"ms.remote.control","params":{"Cmd":"Click","DataOfCmd":"$samsungKey","Option":"false","TypeOfRemote":"SendRemoteKey"}}"""
+                            .toRequestBody("application/json".toMediaType())
+                        val req = Request.Builder().url(url).post(body).build()
+                        httpClient.newCall(req).execute()
+                    } catch (e: Exception) {}
 
                     withContext(Dispatchers.Main) {
                         onComplete(true, "Executed $action on ${tv.name}, Sir.")
@@ -427,7 +575,9 @@ object SmartTvManager {
                     return@launch
                 }
 
-                // Generic Smart TV Key
+                // If DIAL or DLNA, also attempt Samsung WebSocket if port 8001 is listening
+                sendSamsungWebSocketKey(tv.ip, samsungKey)
+
                 withContext(Dispatchers.Main) {
                     onComplete(true, "Signal $action dispatched to ${tv.name}, Sir.")
                 }

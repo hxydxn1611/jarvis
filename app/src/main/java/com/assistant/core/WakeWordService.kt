@@ -251,6 +251,16 @@ class WakeWordService : Service() {
                                     val targetIp = SmartTvManager.activeTv?.ip ?: ""
                                     SmartTvManager.sendTvKey(targetIp, cmd) { _, _ -> }
                                 }
+                                ActionType.SHOW_TV_REMOTE -> {
+                                    val intent = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                        putExtra("SHOW_TV_REMOTE", true)
+                                    }
+                                    startActivity(intent)
+                                }
+                                ActionType.SMART_VIEW -> {
+                                    SmartTvManager.launchScreenMirroring(this@WakeWordService)
+                                }
                                 ActionType.OPEN_APP -> {
                                     val pkg = action.target
                                     if (pkg != null) {

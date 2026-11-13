@@ -280,6 +280,16 @@ class AssistantAccessibilityService : AccessibilityService() {
                             VoiceManager.speak("WiFi network scan found ${tvs.size} Smart TV displays, Sir.")
                         }
                     }
+                    ActionType.SHOW_TV_REMOTE -> {
+                        val intent = Intent(this@AssistantAccessibilityService, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            putExtra("SHOW_TV_REMOTE", true)
+                        }
+                        startActivity(intent)
+                    }
+                    ActionType.SMART_VIEW -> {
+                        SmartTvManager.launchScreenMirroring(this@AssistantAccessibilityService)
+                    }
                     else -> {}
                 }
             }

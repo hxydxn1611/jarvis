@@ -27,6 +27,8 @@ enum class ActionType {
     CAST_TO_TV,
     CONTROL_TV,
     SCAN_WIFI,
+    SHOW_TV_REMOTE,
+    SMART_VIEW,
     SPEAK
 }
 
