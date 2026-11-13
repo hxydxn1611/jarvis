@@ -70,6 +70,8 @@ class MainActivity : AppCompatActivity() {
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.CAMERA,
         Manifest.permission.CALL_PHONE,
+        Manifest.permission.READ_PHONE_STATE,
+        Manifest.permission.READ_CALL_LOG,
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.WRITE_CONTACTS,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -764,6 +766,36 @@ class MainActivity : AppCompatActivity() {
         }
         val lower = clean
 
+        // 0. Communication Updates Briefing (Shortcut: "updates")
+        if (lower == "updates" || lower == "update" || lower == "any updates" || lower.contains("check updates") || 
+            lower.contains("channel updates") || lower.contains("notification updates") || lower.contains("give me updates") ||
+            lower.contains("read notifications") || lower.contains("check notifications") || lower.contains("how many notifications") ||
+            (lower.contains("updates") && (lower.contains("notification") || lower.contains("app") || lower.contains("msg") || lower.contains("message")))) {
+            val report = AssistantNotificationService.getChannelUpdatesReport(this)
+            val spoken = AssistantNotificationService.formatSpokenUpdates(report)
+            val transcript = AssistantNotificationService.formatTranscriptUpdates(report)
+            speakAndDisplay(spoken)
+            runOnUiThread {
+                binding.tvTranscript.text = transcript
+            }
+            return true
+        }
+
+        // 0.1. Tactical Workout & Muscle Conditioning Guide
+        if (lower.contains("workout") || lower.contains("exercise") || lower.contains("train muscle") || lower.contains("train muscles") || lower.contains("fitness guide")) {
+            val group = when {
+                lower.contains("arm") || lower.contains("bicep") || lower.contains("tricep") -> "ARMS"
+                lower.contains("back") || lower.contains("lat") -> "BACK"
+                lower.contains("leg") || lower.contains("squat") -> "LEGS"
+                lower.contains("abs") || lower.contains("core") -> "CORE"
+                lower.contains("hiit") || lower.contains("cardio") || lower.contains("full body") -> "HIIT"
+                else -> "CHEST"
+            }
+            speakAndDisplay("Deploying Stark conditioning protocol for $group, Sir.")
+            showWorkoutDialog(group)
+            return true
+        }
+
         // 1. Flashlight / Torch
         if (lower.contains("flashlight on") || lower.contains("torch on") || 
             lower.contains("turn on flashlight") || lower.contains("turn on torch") || 
@@ -1138,6 +1170,21 @@ class MainActivity : AppCompatActivity() {
                     val hour = action.target?.toIntOrNull() ?: 7
                     val min = action.value?.toIntOrNull() ?: 0
                     DeviceManager(this).setAlarm(hour, min, action.extra ?: "Alarm")
+                }
+                ActionType.COMMUNICATION_UPDATES -> {
+                    val report = AssistantNotificationService.getChannelUpdatesReport(this)
+                    val spoken = AssistantNotificationService.formatSpokenUpdates(report)
+                    val transcript = AssistantNotificationService.formatTranscriptUpdates(report)
+                    speakAndDisplay(spoken)
+                    runOnUiThread {
+                        binding.tvTranscript.text = transcript
+                    }
+                }
+                ActionType.WORKOUT_GUIDE -> {
+                    val targetGroup = action.target ?: "CHEST"
+                    runOnUiThread {
+                        showWorkoutDialog(targetGroup)
+                    }
                 }
                 else -> {
                     // Actions requiring Accessibility (screen clicking, typing, scrolling)
@@ -1525,6 +1572,187 @@ class MainActivity : AppCompatActivity() {
                 dialog.show()
             } catch (e: Exception) {
                 Log.e(TAG, "Error showing TV remote dialog", e)
+            }
+        }
+    }
+
+    private var activeWorkoutDialog: BottomSheetDialog? = null
+
+    private fun showWorkoutDialog(initialGroup: String = "CHEST") {
+        runOnUiThread {
+            try {
+                if (activeWorkoutDialog?.isShowing == true) {
+                    activeWorkoutDialog?.dismiss()
+                }
+
+                val dialog = BottomSheetDialog(this)
+                activeWorkoutDialog = dialog
+                val view = layoutInflater.inflate(R.layout.dialog_workout, null)
+                dialog.setContentView(view)
+
+                var currentProgram = WorkoutManager.getProgram(initialGroup)
+                var currentExerciseIndex = 0
+                var currentSet = 1
+
+                val tvStatus = view.findViewById<TextView>(R.id.tv_workout_status)
+                val tvTitle = view.findViewById<TextView>(R.id.tv_exercise_title)
+                val tvMuscles = view.findViewById<TextView>(R.id.tv_exercise_muscles)
+                val tvReps = view.findViewById<TextView>(R.id.tv_exercise_reps)
+                val tvForm = view.findViewById<TextView>(R.id.tv_exercise_form)
+                val tvTimer = view.findViewById<TextView>(R.id.tv_workout_timer)
+
+                val btnChest = view.findViewById<MaterialButton>(R.id.btn_muscle_chest)
+                val btnArms = view.findViewById<MaterialButton>(R.id.btn_muscle_arms)
+                val btnBack = view.findViewById<MaterialButton>(R.id.btn_muscle_back)
+                val btnLegs = view.findViewById<MaterialButton>(R.id.btn_muscle_legs)
+                val btnCore = view.findViewById<MaterialButton>(R.id.btn_muscle_core)
+                val btnHiit = view.findViewById<MaterialButton>(R.id.btn_muscle_hiit)
+
+                val btnStartSet = view.findViewById<MaterialButton>(R.id.btn_workout_start_set)
+                val btnRest = view.findViewById<MaterialButton>(R.id.btn_workout_rest)
+                val btnNext = view.findViewById<MaterialButton>(R.id.btn_workout_next)
+                val btnFinish = view.findViewById<MaterialButton>(R.id.btn_workout_finish)
+
+                val chipButtons = mapOf(
+                    "CHEST" to btnChest,
+                    "ARMS" to btnArms,
+                    "BACK" to btnBack,
+                    "LEGS" to btnLegs,
+                    "CORE" to btnCore,
+                    "HIIT" to btnHiit
+                )
+
+                fun updateExerciseUi(speakInstructions: Boolean = false) {
+                    val exercise = currentProgram.exercises.getOrNull(currentExerciseIndex) ?: currentProgram.exercises.first()
+                    tvStatus.text = "${currentProgram.icon} ${currentProgram.name} • Exercise ${currentExerciseIndex + 1} of ${currentProgram.exercises.size}"
+                    tvTitle.text = exercise.name
+                    tvMuscles.text = "Target: ${exercise.targetMuscles}"
+                    tvReps.text = "Set $currentSet of ${exercise.sets} • ${exercise.reps}"
+                    tvForm.text = "Form Cue: ${exercise.formTip}"
+
+                    chipButtons.forEach { (key, btn) ->
+                        if (key == currentProgram.id) {
+                            btn.setBackgroundColor(android.graphics.Color.parseColor("#00E5FF"))
+                            btn.setTextColor(android.graphics.Color.BLACK)
+                        } else {
+                            btn.setBackgroundColor(android.graphics.Color.parseColor("#1F2A48"))
+                            btn.setTextColor(android.graphics.Color.parseColor("#00E5FF"))
+                        }
+                    }
+
+                    if (speakInstructions) {
+                        VoiceManager.speak("${exercise.name}. Set $currentSet. ${exercise.jarvisTip}")
+                    }
+                }
+
+                fun selectProgram(groupKey: String) {
+                    SoundEffectManager.playConfirmChirp()
+                    WorkoutManager.stopTimer()
+                    currentProgram = WorkoutManager.getProgram(groupKey)
+                    currentExerciseIndex = 0
+                    currentSet = 1
+                    tvTimer.text = "00:45"
+                    updateExerciseUi(speakInstructions = true)
+                }
+
+                btnChest.setOnClickListener { selectProgram("CHEST") }
+                btnArms.setOnClickListener { selectProgram("ARMS") }
+                btnBack.setOnClickListener { selectProgram("BACK") }
+                btnLegs.setOnClickListener { selectProgram("LEGS") }
+                btnCore.setOnClickListener { selectProgram("CORE") }
+                btnHiit.setOnClickListener { selectProgram("HIIT") }
+
+                btnStartSet.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    val exercise = currentProgram.exercises.getOrNull(currentExerciseIndex) ?: currentProgram.exercises.first()
+                    VoiceManager.speak("Starting Set $currentSet for ${exercise.name}. 45 seconds of continuous tension. Begin.")
+                    tvTimer.setTextColor(android.graphics.Color.parseColor("#00E5FF"))
+
+                    WorkoutManager.startTimer(
+                        durationSeconds = 45,
+                        onTick = { remaining, formatted ->
+                            runOnUiThread {
+                                tvTimer.text = formatted
+                                if (remaining == 15) {
+                                    SoundEffectManager.playWakeChime()
+                                    VoiceManager.speak("15 seconds remaining, Sir. Finish strong.")
+                                } else if (remaining in 1..3) {
+                                    SoundEffectManager.playConfirmChirp()
+                                }
+                            }
+                        },
+                        onComplete = {
+                            runOnUiThread {
+                                tvTimer.text = "00:00"
+                                SoundEffectManager.playWakeChime()
+                                VoiceManager.speak("Set complete, Sir. Outstanding execution. Take 30 seconds of rest.")
+                                tvTimer.setTextColor(android.graphics.Color.parseColor("#FFD54F"))
+                            }
+                        }
+                    )
+                }
+
+                btnRest.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    VoiceManager.speak("Rest interval initiated. 30 seconds to re-oxygenate and clear lactic acid.")
+                    tvTimer.setTextColor(android.graphics.Color.parseColor("#FFD54F"))
+
+                    WorkoutManager.startTimer(
+                        durationSeconds = 30,
+                        onTick = { remaining, formatted ->
+                            runOnUiThread {
+                                tvTimer.text = formatted
+                                if (remaining == 5) {
+                                    VoiceManager.speak("5 seconds. Prepare for your next set.")
+                                }
+                            }
+                        },
+                        onComplete = {
+                            runOnUiThread {
+                                tvTimer.text = "00:45"
+                                tvTimer.setTextColor(android.graphics.Color.parseColor("#00E5FF"))
+                                SoundEffectManager.playWakeChime()
+                                val exercise = currentProgram.exercises.getOrNull(currentExerciseIndex) ?: currentProgram.exercises.first()
+                                if (currentSet < exercise.sets) {
+                                    currentSet++
+                                }
+                                updateExerciseUi(speakInstructions = true)
+                            }
+                        }
+                    )
+                }
+
+                btnNext.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    WorkoutManager.stopTimer()
+                    tvTimer.text = "00:45"
+                    tvTimer.setTextColor(android.graphics.Color.parseColor("#00E5FF"))
+                    if (currentExerciseIndex + 1 < currentProgram.exercises.size) {
+                        currentExerciseIndex++
+                        currentSet = 1
+                        updateExerciseUi(speakInstructions = true)
+                    } else {
+                        VoiceManager.speak("All exercises completed for ${currentProgram.name}, Sir! Remarkable physical dedication.")
+                        Toast.makeText(this, "Program Completed! Outstanding work.", Toast.LENGTH_LONG).show()
+                    }
+                }
+
+                btnFinish.setOnClickListener {
+                    SoundEffectManager.playConfirmChirp()
+                    WorkoutManager.stopTimer()
+                    val quote = WorkoutManager.getRandomQuote()
+                    VoiceManager.speak("Conditioning protocol concluded, Sir. $quote")
+                    dialog.dismiss()
+                }
+
+                dialog.setOnDismissListener {
+                    WorkoutManager.stopTimer()
+                }
+
+                updateExerciseUi(speakInstructions = false)
+                dialog.show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error displaying workout dialog", e)
             }
         }
     }

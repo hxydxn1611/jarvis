@@ -1,7 +1,9 @@
 package com.assistant.core
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.hardware.camera2.CameraManager
 import android.location.Location
@@ -9,8 +11,10 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.provider.AlarmClock
+import android.provider.CallLog
 import android.provider.ContactsContract
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import okhttp3.MediaType.Companion.toMediaType
@@ -88,6 +92,59 @@ class DeviceManager(private val context: Context) {
             cursor?.close()
         }
         return number
+    }
+
+    // Resolves incoming phone number to Contact Name
+    fun lookupContactNameByNumber(number: String): String? {
+        if (number.isBlank()) return null
+        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
+        val projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME)
+        return try {
+            val cursor = context.contentResolver.query(uri, projection, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val idx = it.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
+                    if (idx != -1) it.getString(idx) else null
+                } else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Retrieves callers from missed calls in the past 24 hours
+    fun getRecentMissedCalls(limit: Int = 3): List<String> {
+        val missed = mutableListOf<String>()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            return missed
+        }
+        val uri = CallLog.Calls.CONTENT_URI
+        val projection = arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.DATE)
+        val selection = "${CallLog.Calls.TYPE} = ?"
+        val selectionArgs = arrayOf(CallLog.Calls.MISSED_TYPE.toString())
+        val sortOrder = "${CallLog.Calls.DATE} DESC"
+        try {
+            val cursor = context.contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
+            cursor?.use {
+                val nameIdx = it.getColumnIndex(CallLog.Calls.CACHED_NAME)
+                val numberIdx = it.getColumnIndex(CallLog.Calls.NUMBER)
+                val dateIdx = it.getColumnIndex(CallLog.Calls.DATE)
+                val dayAgo = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+                while (it.moveToNext() && missed.size < limit) {
+                    val date = if (dateIdx != -1) it.getLong(dateIdx) else 0L
+                    if (date < dayAgo) break
+                    val name = if (nameIdx != -1) it.getString(nameIdx) else null
+                    val number = if (numberIdx != -1) it.getString(numberIdx) else null
+                    val caller = name ?: number ?: "Unknown"
+                    if (caller.isNotBlank() && !missed.contains(caller)) {
+                        missed.add(caller)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error querying missed calls", e)
+        }
+        return missed
     }
 
     // --- Email Composition ---

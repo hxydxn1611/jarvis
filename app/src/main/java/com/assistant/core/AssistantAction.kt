@@ -29,6 +29,8 @@ enum class ActionType {
     SCAN_WIFI,
     SHOW_TV_REMOTE,
     SMART_VIEW,
+    WORKOUT_GUIDE,
+    COMMUNICATION_UPDATES,
     SPEAK
 }
 

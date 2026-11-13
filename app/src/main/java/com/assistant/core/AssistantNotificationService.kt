@@ -1,6 +1,7 @@
 package com.assistant.core
 
 import android.app.Notification
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -11,7 +12,22 @@ data class NotificationItem(
     val text: String,
     val isSystemAlert: Boolean = false,
     val isEmail: Boolean = false,
+    val isWhatsApp: Boolean = false,
+    val isInstagram: Boolean = false,
+    val isSnapchat: Boolean = false,
+    val isSms: Boolean = false,
+    val isMissedCall: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
+)
+
+data class ChannelUpdatesReport(
+    val whatsappCount: Int,
+    val instagramCount: Int,
+    val snapchatCount: Int,
+    val emailCount: Int,
+    val smsCount: Int,
+    val missedCalls: List<String>,
+    val recentAlerts: List<NotificationItem>
 )
 
 class AssistantNotificationService : NotificationListenerService() {
@@ -40,6 +56,103 @@ class AssistantNotificationService : NotificationListenerService() {
                 return recentNotifications.firstOrNull { it.isSystemAlert }
             }
         }
+
+        fun getChannelUpdatesReport(context: Context): ChannelUpdatesReport {
+            var wa = 0
+            var insta = 0
+            var snap = 0
+            var mail = 0
+            var sms = 0
+            val missed = mutableListOf<String>()
+
+            // 1. Inspect live active notifications in drawer if listener is connected
+            val active = try { instance?.activeNotifications } catch (e: Exception) { null }
+            if (active != null && active.isNotEmpty()) {
+                for (sbn in active) {
+                    if (sbn.isOngoing) continue
+                    val pkg = sbn.packageName.lowercase()
+                    val title = sbn.notification?.extras?.getString(Notification.EXTRA_TITLE) ?: ""
+                    val text = sbn.notification?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+                    val combined = "$title $text".lowercase()
+
+                    when {
+                        pkg.contains("whatsapp") -> wa++
+                        pkg.contains("instagram") -> insta++
+                        pkg.contains("snapchat") -> snap++
+                        pkg == "com.google.android.gm" || pkg.contains("mail") || pkg.contains("email") || pkg.contains("outlook") -> mail++
+                        pkg.contains("messaging") || pkg.contains("mms") -> sms++
+                        sbn.notification?.category == Notification.CATEGORY_MISSED_CALL || combined.contains("missed call") -> {
+                            val caller = if (title.isNotBlank()) title else "Unknown"
+                            if (!missed.contains(caller)) missed.add(caller)
+                        }
+                    }
+                }
+            }
+
+            // 2. Also check internal history buffer
+            synchronized(recentNotifications) {
+                for (item in recentNotifications.takeLast(25)) {
+                    val combined = "${item.title} ${item.text}".lowercase()
+                    if (item.isMissedCall || combined.contains("missed call")) {
+                        val caller = if (item.title.isNotBlank()) item.title else "Unknown"
+                        if (!missed.contains(caller)) missed.add(caller)
+                    }
+                }
+                if (wa == 0) wa = recentNotifications.count { it.isWhatsApp }
+                if (insta == 0) insta = recentNotifications.count { it.isInstagram }
+                if (snap == 0) snap = recentNotifications.count { it.isSnapchat }
+                if (mail == 0) mail = recentNotifications.count { it.isEmail }
+                if (sms == 0) sms = recentNotifications.count { it.isSms }
+            }
+
+            // 3. Fallback to Device CallLog if permission granted
+            if (missed.isEmpty()) {
+                val callLogMissed = DeviceManager(context).getRecentMissedCalls()
+                missed.addAll(callLogMissed)
+            }
+
+            return ChannelUpdatesReport(
+                whatsappCount = wa,
+                instagramCount = insta,
+                snapchatCount = snap,
+                emailCount = mail,
+                smsCount = sms,
+                missedCalls = missed,
+                recentAlerts = getRecent(5)
+            )
+        }
+
+        fun formatSpokenUpdates(report: ChannelUpdatesReport): String {
+            val parts = mutableListOf<String>()
+            if (report.whatsappCount > 0) parts.add("${report.whatsappCount} WhatsApp message${if (report.whatsappCount > 1) "s" else ""}")
+            if (report.instagramCount > 0) parts.add("${report.instagramCount} Instagram alert${if (report.instagramCount > 1) "s" else ""}")
+            if (report.snapchatCount > 0) parts.add("${report.snapchatCount} Snapchat ping${if (report.snapchatCount > 1) "s" else ""}")
+            if (report.emailCount > 0) parts.add("${report.emailCount} unread email${if (report.emailCount > 1) "s" else ""}")
+            if (report.smsCount > 0) parts.add("${report.smsCount} new SMS message${if (report.smsCount > 1) "s" else ""}")
+            if (report.missedCalls.isNotEmpty()) {
+                val callers = report.missedCalls.joinToString(" and ")
+                parts.add("${report.missedCalls.size} missed call${if (report.missedCalls.size > 1) "s" else ""} from $callers")
+            }
+
+            return if (parts.isEmpty()) {
+                "All primary communication channels are clear, Sir. No pending notifications from WhatsApp, Instagram, Snapchat, Mail, SMS, or Missed Calls."
+            } else {
+                "Communications briefing, Sir: You have " + parts.joinToString(", ") + ". All other channels clear."
+            }
+        }
+
+        fun formatTranscriptUpdates(report: ChannelUpdatesReport): String {
+            return StringBuilder()
+                .append("STARK TELEMETRY // COMMUNICATIONS BRIEFING\n")
+                .append("-----------------------------------------\n")
+                .append("• WhatsApp: ").append(if (report.whatsappCount > 0) "${report.whatsappCount} pending" else "Clear").append("\n")
+                .append("• Instagram: ").append(if (report.instagramCount > 0) "${report.instagramCount} alert(s)" else "Clear").append("\n")
+                .append("• Snapchat: ").append(if (report.snapchatCount > 0) "${report.snapchatCount} ping(s)" else "Clear").append("\n")
+                .append("• Mail / Gmail: ").append(if (report.emailCount > 0) "${report.emailCount} unread" else "Clear").append("\n")
+                .append("• SMS / Messaging: ").append(if (report.smsCount > 0) "${report.smsCount} unread" else "Clear").append("\n")
+                .append("• Missed Calls: ").append(if (report.missedCalls.isNotEmpty()) report.missedCalls.joinToString(", ") else "None").append("\n")
+                .toString()
+        }
     }
 
     override fun onListenerConnected() {
@@ -65,24 +178,43 @@ class AssistantNotificationService : NotificationListenerService() {
         val pkg = sbn.packageName.lowercase()
         val combined = "$title $text".lowercase()
 
-        // Detect Samsung One UI / Android System Software Updates
+        // 1. Detect Incoming Calls (announce aloud in real-time)
+        val isIncomingCall = sbn.notification?.category == Notification.CATEGORY_CALL ||
+                (pkg.contains("dialer") && (combined.contains("incoming call") || combined.contains("calling") || combined.contains("incoming")))
+        if (isIncomingCall) {
+            val caller = if (title.isNotBlank()) title else "an incoming caller"
+            VoiceManager.speak("Sir, incoming transmission from $caller.")
+            return
+        }
+
+        // 2. Detect Missed Calls
+        val isMissedCall = sbn.notification?.category == Notification.CATEGORY_MISSED_CALL ||
+                (pkg.contains("dialer") && (combined.contains("missed call") || combined.contains("missed")))
+
+        // 3. Detect WhatsApp, Instagram, Snapchat, Mail, SMS
+        val isWhatsApp = pkg.contains("whatsapp")
+        val isInstagram = pkg.contains("instagram")
+        val isSnapchat = pkg.contains("snapchat")
+        val isSms = pkg.contains("messaging") || pkg.contains("mms") || pkg == "com.google.android.apps.messaging" || pkg == "com.samsung.android.messaging"
+        val isEmail = pkg == "com.google.android.gm" || pkg.contains("mail") || pkg.contains("outlook") || pkg.contains("email")
+
+        // 4. Detect Samsung One UI / Android System Software Updates
         val isUpdate = pkg.contains("wssyncmldm") || 
                        pkg.contains("soagent") || 
                        pkg.contains("fota") ||
                        (pkg == "android" && (combined.contains("update") || combined.contains("firmware") || combined.contains("restart to update")))
-
-        // Detect Incoming Emails (Gmail, Samsung Mail, Outlook)
-        val isEmail = pkg == "com.google.android.gm" || 
-                      pkg.contains("mail") || 
-                      pkg.contains("outlook") || 
-                      pkg.contains("email")
 
         val item = NotificationItem(
             packageName = sbn.packageName,
             title = title,
             text = text,
             isSystemAlert = isUpdate,
-            isEmail = isEmail
+            isEmail = isEmail,
+            isWhatsApp = isWhatsApp,
+            isInstagram = isInstagram,
+            isSnapchat = isSnapchat,
+            isSms = isSms,
+            isMissedCall = isMissedCall
         )
 
         synchronized(recentNotifications) {

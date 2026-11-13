@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#0F1424"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:background="#3300E5FF"
+        android:layout_marginBottom="14dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="STARK CONDITIONING PROTOCOL"
+        android:textColor="#00E5FF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:letterSpacing="0.1" />
+
+    <TextView
+        android:id="@+id/tv_workout_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Tactical physical training and muscle conditioning"
+        android:textColor="#81D4FA"
+        android:textSize="12sp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="14dp" />
+
+    <!-- Muscle Group Selection Horizontal Scroll -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:layout_marginBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_muscle_chest"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="💪 CHEST"
+                android:textColor="#000000"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                app:backgroundTint="#00E5FF"
+                app:cornerRadius="8dp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_muscle_arms"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="🦾 ARMS"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                app:backgroundTint="#1F2A48"
+                app:cornerRadius="8dp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_muscle_back"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="🏋️ BACK"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                app:backgroundTint="#1F2A48"
+                app:cornerRadius="8dp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_muscle_legs"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="🦵 LEGS"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                app:backgroundTint="#1F2A48"
+                app:cornerRadius="8dp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_muscle_core"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="⚡ CORE / ABS"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                app:backgroundTint="#1F2A48"
+                app:cornerRadius="8dp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_muscle_hiit"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="🔥 FULL BODY"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                app:backgroundTint="#1F2A48"
+                app:cornerRadius="8dp" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- Active Exercise Card -->
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="#1A00E5FF"
+        app:strokeColor="#00E5FF"
+        app:strokeWidth="1dp"
+        app:cardCornerRadius="12dp"
+        android:layout_marginBottom="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tv_exercise_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Standard Push-ups"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/tv_exercise_muscles"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Target: Pectoralis Major, Triceps, Anterior Deltoids"
+                android:textColor="#00E5FF"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/tv_exercise_reps"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Set 1 of 3 • 15 Repetitions"
+                android:textColor="#FFD54F"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:id="@+id/tv_exercise_form"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Form Cue: Keep core rigid, lower chest to floor, elbows at 45 degrees. Explode upward."
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:layout_marginTop="8dp" />
+
+            <!-- Live Timer Counter -->
+            <TextView
+                android:id="@+id/tv_workout_timer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="00:45"
+                android:gravity="center"
+                android:textColor="#00E5FF"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="4dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Workout Control Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="10dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_workout_start_set"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="▶️ START SET"
+            android:textColor="#000000"
+            android:textStyle="bold"
+            app:backgroundTint="#00E5FF"
+            app:cornerRadius="10dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_workout_rest"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="⏸️ 30s REST"
+            android:textColor="#00E5FF"
+            app:backgroundTint="#1F2A48"
+            app:strokeColor="#00E5FF"
+            app:strokeWidth="1dp"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_workout_next"
+            android:layout_width="0dp"
+            android:layout_height="46dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="⏭️ NEXT EXERCISE"
+            android:textColor="#81D4FA"
+            app:backgroundTint="#151D33"
+            app:cornerRadius="10dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_workout_finish"
+            android:layout_width="0dp"
+            android:layout_height="46dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="⏹️ END WORKOUT"
+            android:textColor="#FF5252"
+            app:backgroundTint="#151D33"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+</LinearLayout>

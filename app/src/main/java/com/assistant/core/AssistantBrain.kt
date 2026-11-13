@@ -154,6 +154,8 @@ class AssistantBrain(private val context: Context) {
             - SCAN_WIFI
             - SHOW_TV_REMOTE
             - SMART_VIEW
+            - WORKOUT_GUIDE (target: "CHEST" | "ARMS" | "BACK" | "LEGS" | "CORE" | "HIIT")
+            - COMMUNICATION_UPDATES
             - SET_ALARM (target: hour, value: minute, extra: label)
             - PLAY_SPOTIFY (target: song or artist)
             - FLASHLIGHT_TOGGLE (value: "true" or "false")
@@ -168,6 +170,8 @@ class AssistantBrain(private val context: Context) {
             - SCROLL_DOWN / SCROLL_UP / GLOBAL_HOME / GLOBAL_BACK / TAKE_SCREENSHOT
             
             SPECIAL BEHAVIORS:
+            - If user says "updates", "any updates", "notifications updates", or asks what notifications have arrived from WhatsApp, Instagram, Snapchat, Email, SMS, or Missed Calls, append COMMUNICATION_UPDATES action.
+            - If user asks for a workout, exercise guide, muscle training, gym session, or fitness regimen, speak encouragement and append WORKOUT_GUIDE action with the targeted muscle group (e.g. CHEST, ARMS, BACK, LEGS, CORE, HIIT).
             - If user asks to check, read, or summarize their emails or mail, inspect 'Recent Incoming Emails'. If emails exist, summarize them clearly (e.g. 'Sir, you have an email from [Sender] regarding [Subject]'). If none are found, announce that no new email alerts have arrived and offer to open Gmail with OPEN_APP (target: com.google.android.gm).
             - If user asks to send WhatsApp message to someone, generate SEND_WHATSAPP action with contact and text.
             - If user asks to open TV remote, control the TV, or show TV controls, generate SHOW_TV_REMOTE action.
@@ -575,6 +579,21 @@ class AssistantBrain(private val context: Context) {
             lower.startsWith("type ") -> {
                 val text = lower.removePrefix("type ").trim()
                 actions.add(AssistantAction(ActionType.TYPE_TEXT, value = text))
+            }
+            lower == "updates" || lower.contains("app updates") || lower.contains("notification update") || lower.contains("channel updates") || lower.contains("any updates") -> {
+                actions.add(AssistantAction(ActionType.COMMUNICATION_UPDATES))
+            }
+            lower.contains("workout") || lower.contains("exercise") || lower.contains("train muscles") || lower.contains("train muscle") || lower.contains("fitness") -> {
+                val group = when {
+                    lower.contains("arm") || lower.contains("bicep") || lower.contains("tricep") -> "ARMS"
+                    lower.contains("back") || lower.contains("lat") -> "BACK"
+                    lower.contains("leg") || lower.contains("squat") -> "LEGS"
+                    lower.contains("abs") || lower.contains("core") -> "CORE"
+                    lower.contains("hiit") || lower.contains("cardio") || lower.contains("full body") -> "HIIT"
+                    else -> "CHEST"
+                }
+                actions.add(AssistantAction(ActionType.SPEAK, value = "Deploying Stark conditioning protocol for $group, Sir."))
+                actions.add(AssistantAction(ActionType.WORKOUT_GUIDE, target = group))
             }
             lower.contains("update") && (lower.contains("software") || lower.contains("system")) -> {
                 val update = AssistantNotificationService.checkSystemSoftwareUpdate()
