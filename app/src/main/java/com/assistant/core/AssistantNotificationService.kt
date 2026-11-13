@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 
 data class NotificationItem(
     val packageName: String,
@@ -128,7 +129,45 @@ class AssistantNotificationService : NotificationListenerService() {
                 }
             }
 
+            // Direct SMS Content Provider fallback if messages are still empty
             if (messages.isEmpty()) {
+                try {
+                    val cursor = context.contentResolver.query(
+                        android.net.Uri.parse("content://sms/inbox"),
+                        arrayOf("address", "body"),
+                        "read = 0",
+                        null,
+                        "date DESC LIMIT 5"
+                    )
+                    cursor?.use {
+                        val addrIdx = it.getColumnIndex("address")
+                        val bodyIdx = it.getColumnIndex("body")
+                        while (it.moveToNext()) {
+                            val addr = if (addrIdx >= 0) it.getString(addrIdx) ?: "SMS" else "SMS"
+                            val body = if (bodyIdx >= 0) it.getString(bodyIdx) ?: "" else ""
+                            messages.add(
+                                NotificationItem(
+                                    packageName = "com.google.android.apps.messaging",
+                                    title = addr,
+                                    text = body,
+                                    isSms = true
+                                )
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Direct SMS inbox query exception", e)
+                }
+            }
+
+            if (messages.isEmpty()) {
+                val isListenerAuthorized = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+                if (!isListenerAuthorized) {
+                    val spoken = "Notification telemetry is currently unauthorized in Android settings, Sir. Please tap the authorization banner on your display to enable notification access so I can monitor and read your incoming transmissions."
+                    val transcript = "STARK TELEMETRY // NOTIFICATION ACCESS UNAUTHORIZED\n-----------------------------------------\nTap the 'Enable' banner on your HUD to grant Notification Access in Android Settings."
+                    return Pair(spoken, transcript)
+                }
+
                 val spoken = "You have no unread transmissions at this time, Sir. All communication channels are clear."
                 val transcript = "STARK TELEMETRY // COMMUNICATIONS BRIEFING\nAll channels clear. No unread messages."
                 return Pair(spoken, transcript)
@@ -205,7 +244,20 @@ class AssistantNotificationService : NotificationListenerService() {
                 if (sms == 0) sms = recentNotifications.count { it.isSms }
             }
 
-            // 3. Fallback to Device CallLog if permission granted
+            // 3. Fallback to Device CallLog & SMS provider if listener was offline
+            if (sms == 0) {
+                try {
+                    val cursor = context.contentResolver.query(
+                        android.net.Uri.parse("content://sms/inbox"),
+                        arrayOf("_id"),
+                        "read = 0",
+                        null,
+                        null
+                    )
+                    cursor?.use { sms = it.count }
+                } catch (e: Exception) {}
+            }
+
             if (missed.isEmpty()) {
                 val callLogMissed = DeviceManager(context).getRecentMissedCalls()
                 missed.addAll(callLogMissed)
@@ -222,7 +274,7 @@ class AssistantNotificationService : NotificationListenerService() {
             )
         }
 
-        fun formatSpokenUpdates(report: ChannelUpdatesReport): String {
+        fun formatSpokenUpdates(report: ChannelUpdatesReport, context: Context? = null): String {
             val parts = mutableListOf<String>()
             if (report.whatsappCount > 0) parts.add("${report.whatsappCount} WhatsApp message${if (report.whatsappCount > 1) "s" else ""}")
             if (report.instagramCount > 0) parts.add("${report.instagramCount} Instagram alert${if (report.instagramCount > 1) "s" else ""}")
@@ -234,10 +286,13 @@ class AssistantNotificationService : NotificationListenerService() {
                 parts.add("${report.missedCalls.size} missed call${if (report.missedCalls.size > 1) "s" else ""} from $callers")
             }
 
-            return if (parts.isEmpty()) {
-                "All primary communication channels are clear, Sir. No pending notifications from WhatsApp, Instagram, Snapchat, Mail, SMS, or Missed Calls."
+            if (parts.isEmpty()) {
+                if (context != null && !NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) {
+                    return "Notification telemetry is currently unauthorized in Android settings, Sir. Please tap the authorization banner on your display to enable notification access so I can monitor and read your incoming transmissions."
+                }
+                return "All primary communication channels are clear, Sir. No pending notifications from WhatsApp, Instagram, Snapchat, Mail, SMS, or Missed Calls."
             } else {
-                "Communications briefing, Sir: You have " + parts.joinToString(", ") + ". All other channels clear."
+                return "Communications briefing, Sir: You have " + parts.joinToString(", ") + ". All other channels clear."
             }
         }
 

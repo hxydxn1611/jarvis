@@ -22,6 +22,14 @@ object StarkProtocolEngine {
             .removePrefix("jarvis").removePrefix("hey jarvis").removePrefix("ok jarvis").trim()
             .removePrefix(",").trim()
 
+        // 0. Protocols Inquiry / List
+        if (lower == "protocols" || lower == "protocol" || lower == "list protocols" || 
+            lower == "all protocols" || lower == "show protocols" || lower.contains("what are your protocols") || 
+            lower.contains("what protocols") || lower == "protocols list" || lower.contains("initiate protocols") ||
+            lower.contains("available protocols") || lower.contains("protocols please") || lower.startsWith("protocol ") && lower.endsWith("list")) {
+            return listAvailableProtocols()
+        }
+
         // 1. House Protocol / Protocol House Party
         if (lower.contains("house protocol") || lower.contains("party protocol") || lower.contains("house party")) {
             return executeHouseProtocol(context)
@@ -40,8 +48,9 @@ object StarkProtocolEngine {
             return executeSentryProtocol(context, arm = false)
         }
 
-        // 4. Protocol Silent Watch / Ghost Protocol
-        if (lower.contains("silent watch") || lower.contains("ghost protocol") || lower.contains("protocol ghost") || lower.contains("protocol silent")) {
+        // 4. Protocol Silent Watch / Ghost Protocol / Stealth Mode
+        if (lower.contains("silent watch") || lower.contains("ghost protocol") || lower.contains("protocol ghost") || 
+            lower.contains("protocol silent") || lower.contains("stealth protocol") || lower.contains("stealth mode")) {
             return executeSilentWatchProtocol(context)
         }
 
@@ -60,16 +69,48 @@ object StarkProtocolEngine {
             return executeVeronicaProtocol(context)
         }
 
-        // 8. Protocol Catch-all check: "Protocol [Name]"
+        // 8. Flight Protocol / Travel Protocol
+        if (lower.contains("flight protocol") || lower.contains("protocol flight") || lower.contains("travel mode") || lower.contains("protocol travel")) {
+            return executeFlightProtocol(context)
+        }
+
+        // 9. Sleep Protocol / Rest Mode
+        if (lower.contains("sleep protocol") || lower.contains("protocol sleep") || lower.contains("rest mode") || lower == "goodnight jarvis" || lower == "good night jarvis") {
+            return executeSleepProtocol(context)
+        }
+
+        // 10. Overdrive Protocol / Maximum Power Mode
+        if (lower.contains("overdrive") || lower.contains("protocol overdrive") || lower.contains("maximum effort")) {
+            return executeOverdriveProtocol(context)
+        }
+
+        // 11. Workout Protocol / Iron Conditioning (Train Muscles)
+        if (lower.contains("workout") || lower.contains("gym protocol") || lower.contains("training protocol") || lower.contains("train my muscles") || lower.contains("exercise protocol") || lower.contains("fitness protocol")) {
+            return executeWorkoutProtocol(context)
+        }
+
+        // 12. Protocol Catch-all: "Protocol [Name]" or plural "protocols"
+        if (lower.contains("protocols")) {
+            return listAvailableProtocols()
+        }
         if (lower.startsWith("protocol ") || lower.contains(" protocol")) {
             val name = lower.substringAfter("protocol").trim().replace(Regex("[^a-zA-Z0-9 ]"), "")
-            return Pair(
-                "Protocol $name acknowledged, Sir. Realigning local telemetry and standing by for sequence parameters.",
-                listOf(AssistantAction(ActionType.SPEAK, value = "Protocol $name acknowledged, Sir."))
-            )
+            if (name.isNotBlank()) {
+                val speech = "Protocol ${name.uppercase()} acknowledged, Sir. Realigning local telemetry and standing by for sequence parameters."
+                return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+            }
         }
 
         return null
+    }
+
+    private fun listAvailableProtocols(): Pair<String, List<AssistantAction>> {
+        SoundEffectManager.playConfirmChirp()
+        val speech = "Active Stark Protocols on deck, Sir: House Party, Clean Slate, Sentry Mode, Ghost Protocol, Protocol 11, Veronica, Workshop, Flight Protocol, Workout Regimen, Sleep Protocol, and Overdrive. State any protocol name to initiate."
+        val actions = listOf(
+            AssistantAction(ActionType.SPEAK, value = speech)
+        )
+        return Pair(speech, actions)
     }
 
     private fun executeHouseProtocol(context: Context): Pair<String, List<AssistantAction>> {
@@ -158,6 +199,47 @@ object StarkProtocolEngine {
         return Pair(speech, actions)
     }
 
+    private fun executeFlightProtocol(context: Context): Pair<String, List<AssistantAction>> {
+        val dm = DeviceManager(context)
+        val batt = dm.getBatteryLevel()
+        SoundEffectManager.playConfirmChirp()
+
+        val speech = "Flight Protocol engaged, Sir. Telemetry indicates battery reserves at $batt percent. Non-urgent alerts throttled, sensory telemetry primed for transit."
+        val actions = listOf(
+            AssistantAction(ActionType.SPEAK, value = speech)
+        )
+        return Pair(speech, actions)
+    }
+
+    private fun executeSleepProtocol(context: Context): Pair<String, List<AssistantAction>> {
+        SoundEffectManager.playConfirmChirp()
+        val speech = "Sleep Protocol active, Sir. Core lighting dimmed, sensory perimeter set to silent sentry watch. Goodnight, Sir."
+        val actions = listOf(
+            AssistantAction(ActionType.SPEAK, value = speech)
+        )
+        return Pair(speech, actions)
+    }
+
+    private fun executeOverdriveProtocol(context: Context): Pair<String, List<AssistantAction>> {
+        SoundEffectManager.playWakeChime()
+        val speech = "Overdrive Protocol activated, Sir. Power routing at 100 percent, network peripheral mesh refreshed, core operating at peak capacity."
+        val actions = listOf(
+            AssistantAction(ActionType.SCAN_WIFI),
+            AssistantAction(ActionType.SPEAK, value = speech)
+        )
+        return Pair(speech, actions)
+    }
+
+    private fun executeWorkoutProtocol(context: Context): Pair<String, List<AssistantAction>> {
+        SoundEffectManager.playWakeChime()
+        val speech = "Workout Protocol engaged, Sir. Biometric conditioning activated. Today's regimen: 4 sets of 20 pushups, 25 bodyweight squats, and a 60-second core plank. Commencing session pacing now. Let's build that Stark physique, Sir."
+        val actions = listOf(
+            AssistantAction(ActionType.WORKOUT_GUIDE),
+            AssistantAction(ActionType.SPEAK, value = speech)
+        )
+        return Pair(speech, actions)
+    }
+
     private fun triggerHapticPulse(context: Context, durationMs: Long) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -173,4 +255,3 @@ object StarkProtocolEngine {
         }
     }
 }
-

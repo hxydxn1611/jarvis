@@ -246,6 +246,7 @@ object VoiceManager : TextToSpeech.OnInitListener {
     fun listen(
         context: Context,
         onPartialResult: ((String) -> Unit)? = null,
+        onRmsChanged: ((Float) -> Unit)? = null,
         onResult: (String) -> Unit,
         onError: ((String) -> Unit)? = null
     ) {
@@ -276,7 +277,9 @@ object VoiceManager : TextToSpeech.OnInitListener {
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {}
                 override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onRmsChanged(rmsdB: Float) {
+                    onRmsChanged?.invoke(rmsdB)
+                }
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onError(error: Int) {

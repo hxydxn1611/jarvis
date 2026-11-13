@@ -23,6 +23,22 @@ object GhostPilot {
     private val scope = CoroutineScope(Dispatchers.Main)
 
     /**
+     * Normalizes spoken number words (e.g. "nine eight seven") into raw numeric digits
+     */
+    fun normalizeSpokenDigits(text: String): String {
+        val wordMap = mapOf(
+            "zero" to "0", "oh" to "0", "one" to "1", "two" to "2",
+            "three" to "3", "four" to "4", "five" to "5",
+            "six" to "6", "seven" to "7", "eight" to "8", "nine" to "9"
+        )
+        var result = text.lowercase()
+        for ((word, digit) in wordMap) {
+            result = result.replace(Regex("\\b$word\\b"), digit)
+        }
+        return result
+    }
+
+    /**
      * Autonomously dispatches a WhatsApp message to a contact or phone number
      */
     fun sendWhatsApp(
@@ -34,13 +50,13 @@ object GhostPilot {
         scope.launch {
             try {
                 val deviceManager = DeviceManager(service)
-                var phone = targetContactOrNumber.replace(Regex("[^0-9+]"), "")
+                var phone = normalizeSpokenDigits(targetContactOrNumber).replace(Regex("[^0-9+]"), "")
                 
                 // If not numeric or too short, resolve from device contacts book
                 if (phone.length < 10) {
                     val lookedUp = deviceManager.lookupContactNumber(targetContactOrNumber)
                     if (!lookedUp.isNullOrBlank()) {
-                        phone = lookedUp.replace(Regex("[^0-9+]"), "")
+                        phone = normalizeSpokenDigits(lookedUp).replace(Regex("[^0-9+]"), "")
                     }
                 }
 
@@ -65,12 +81,9 @@ object GhostPilot {
                     }
                     service.startActivity(intent)
 
-                    // Wait for WhatsApp to open and load the message input field
-                    delay(1800)
-
-                    // Find and click the WhatsApp send button
-                    val clicked = clickSendButton(service)
-                    delay(1000)
+                    // Actively poll for the WhatsApp Send button to appear as chat initializes
+                    val clicked = pollAndClickSend(service, maxAttempts = 22, delayIntervalMs = 200)
+                    delay(800)
                     service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
 
                     if (clicked) {
@@ -117,11 +130,11 @@ object GhostPilot {
     ) {
         try {
             val dm = DeviceManager(context)
-            var phone = targetContactOrNumber.replace(Regex("[^0-9+]"), "")
+            var phone = normalizeSpokenDigits(targetContactOrNumber).replace(Regex("[^0-9+]"), "")
             if (phone.length < 10) {
                 val lookedUp = dm.lookupContactNumber(targetContactOrNumber)
                 if (!lookedUp.isNullOrBlank()) {
-                    phone = lookedUp.replace(Regex("[^0-9+]"), "")
+                    phone = normalizeSpokenDigits(lookedUp).replace(Regex("[^0-9+]"), "")
                 }
             }
             if (phone.startsWith("+")) {
@@ -145,35 +158,39 @@ object GhostPilot {
                 }
                 context.startActivity(intent)
 
-                // If accessibility service is active, auto-click send after chat opens
+                // If accessibility service is active, auto-click send via polling loop
                 val service = AssistantAccessibilityService.instance
                 if (service != null) {
                     scope.launch {
-                        delay(1200)
-                        clickSendButton(service)
+                        val clicked = pollAndClickSend(service, maxAttempts = 22, delayIntervalMs = 200)
+                        if (clicked) {
+                            delay(800)
+                            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                        }
                     }
                 }
                 onComplete?.invoke(true, "Transmitting WhatsApp message to $targetContactOrNumber, Sir.")
             } else {
-                // Pre-fill message via WhatsApp share intent
-                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, message)
-                    setPackage("com.whatsapp")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                try {
-                    context.startActivity(sendIntent)
-                    onComplete?.invoke(true, "Opening WhatsApp for $targetContactOrNumber with message queued, Sir.")
-                } catch (e2: Exception) {
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage("com.whatsapp")
-                    if (launchIntent != null) {
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(launchIntent)
-                        onComplete?.invoke(true, "Opening WhatsApp, Sir.")
+                val launchIntent = context.packageManager.getLaunchIntentForPackage("com.whatsapp")
+                if (launchIntent != null) {
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(launchIntent)
+                    val service = AssistantAccessibilityService.instance
+                    if (service != null) {
+                        scope.launch {
+                            delay(1500)
+                            searchAndOpenChat(service, targetContactOrNumber)
+                            delay(1200)
+                            typeAndSendInCurrentChat(service, message)
+                            delay(800)
+                            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                        }
+                        onComplete?.invoke(true, "Opening WhatsApp and searching for $targetContactOrNumber, Sir.")
                     } else {
-                        onComplete?.invoke(false, "WhatsApp is not installed on this terminal, Sir.")
+                        onComplete?.invoke(true, "Opening WhatsApp for $targetContactOrNumber, Sir. Please enable Accessibility in Settings for automatic typing.")
                     }
+                } else {
+                    onComplete?.invoke(false, "WhatsApp is not installed on this terminal, Sir.")
                 }
             }
         } catch (e: Exception) {
@@ -247,27 +264,64 @@ object GhostPilot {
         }
     }
 
+    private suspend fun pollAndClickSend(service: AssistantAccessibilityService, maxAttempts: Int = 22, delayIntervalMs: Long = 200): Boolean {
+        for (i in 1..maxAttempts) {
+            delay(delayIntervalMs)
+            if (clickSendButton(service)) {
+                Log.i(TAG, "WhatsApp Send button successfully clicked on attempt $i")
+                return true
+            }
+        }
+        return false
+    }
+
     private fun clickSendButton(service: AssistantAccessibilityService): Boolean {
         val root = service.rootInActiveWindow ?: return false
-        // WhatsApp Send button typically has content description "Send" or id "send"
-        val sendNodes = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
-        if (sendNodes.isNotEmpty()) {
-            return sendNodes[0].performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val candidateIds = listOf(
+            "com.whatsapp:id/send",
+            "com.whatsapp.w4b:id/send",
+            "com.whatsapp:id/entry_action",
+            "com.whatsapp.w4b:id/entry_action"
+        )
+        for (id in candidateIds) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            for (node in nodes) {
+                if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true
+                }
+            }
         }
 
         val textNodes = root.findAccessibilityNodeInfosByText("Send")
-        if (textNodes.isNotEmpty()) {
-            return textNodes[0].performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        for (node in textNodes) {
+            if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+            node.parent?.let { parent ->
+                if (parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true
+                }
+            }
         }
 
-        // Search recursively for node with contentDescription "Send"
+        // Search recursively for node with contentDescription containing "Send"
         return findAndClickNodeByDesc(root, "Send")
     }
 
     private fun findAndClickNodeByDesc(node: AccessibilityNodeInfo?, desc: String): Boolean {
         if (node == null) return false
-        if (node.contentDescription?.toString()?.equals(desc, ignoreCase = true) == true) {
-            return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val cd = node.contentDescription?.toString()
+        if (cd != null && cd.contains(desc, ignoreCase = true)) {
+            if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+            var curr = node.parent
+            while (curr != null) {
+                if (curr.isClickable && curr.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true
+                }
+                curr = curr.parent
+            }
         }
         for (i in 0 until node.childCount) {
             if (findAndClickNodeByDesc(node.getChild(i), desc)) return true

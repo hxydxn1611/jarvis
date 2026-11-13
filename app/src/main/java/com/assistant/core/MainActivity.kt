@@ -29,6 +29,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.assistant.core.databinding.ActivityMainBinding
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -187,22 +188,9 @@ class MainActivity : AppCompatActivity() {
         if (pendingAutoListen) {
             pendingAutoListen = false
             SoundEffectManager.playWakeChime()
-            var listened = false
-            val startListeningSafely = {
-                if (!listened) {
-                    listened = true
-                    scope.launch(Dispatchers.Main) {
-                        delay(120)
-                        triggerVoiceListening()
-                    }
-                }
-            }
-            VoiceManager.speak("At your service, Sir.") {
-                startListeningSafely()
-            }
-            scope.launch {
-                delay(2200)
-                startListeningSafely()
+            scope.launch(Dispatchers.Main) {
+                delay(180)
+                triggerVoiceListening()
             }
             return
         }
@@ -318,6 +306,12 @@ class MainActivity : AppCompatActivity() {
             toggleHandsFree()
         }
 
+        // Stark Protocols Quick Ribbon
+        binding.chipHouseParty.setOnClickListener { handleUserInput("house protocol") }
+        binding.chipCleanSlate.setOnClickListener { handleUserInput("protocol clean slate") }
+        binding.chipSentryMode.setOnClickListener { handleUserInput("sentry mode") }
+        binding.chipProtocol11.setOnClickListener { handleUserInput("protocol 11") }
+
         // Quick System Controls
         binding.chipCalibrateVoice.setOnClickListener {
             startVoiceCalibration()
@@ -361,10 +355,17 @@ class MainActivity : AppCompatActivity() {
 
         // Fix Permissions Banner button
         binding.btnFixPerms.setOnClickListener {
-            if (!AssistantAccessibilityService.isRunning) {
+            val hasNotif = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+            val hasAccess = AssistantAccessibilityService.isRunning
+            val hasOverlay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
+
+            if (!hasNotif) {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                Toast.makeText(this, "Enable 'Jarvis Assistant' Notification Access in Settings", Toast.LENGTH_LONG).show()
+            } else if (!hasAccess) {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 Toast.makeText(this, "Enable 'Jarvis Assistant' under Installed Apps", Toast.LENGTH_LONG).show()
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            } else if (!hasOverlay && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
                 startActivity(intent)
             }
@@ -421,21 +422,18 @@ class MainActivity : AppCompatActivity() {
                         override fun onBeginningOfSpeech() {}
 
                         override fun onRmsChanged(rmsdB: Float) {
-                            if (rmsdB > 2.0f && !VoiceManager.isCurrentlySpeaking()) {
-                                val boost = 1.0f + (rmsdB.coerceIn(0f, 10f) / 10f) * 0.22f
-                                runOnUiThread {
-                                    try {
-                                        binding.viewCoreGlow.scaleX = boost
-                                        binding.viewCoreGlow.scaleY = boost
-                                    } catch (e: Exception) {}
-                                }
+                            if (!VoiceManager.isCurrentlySpeaking()) {
+                                animateEqualizer(rmsdB)
                             }
                         }
 
                         override fun onBufferReceived(buffer: ByteArray?) {}
-                        override fun onEndOfSpeech() {}
+                        override fun onEndOfSpeech() {
+                            resetEqualizer()
+                        }
 
                         override fun onError(error: Int) {
+                            resetEqualizer()
                             isAmbientListening = false
                             if (isHandsFreeEnabled && !isProcessingCommand && !isFinishing && !isDestroyed) {
                                 scope.launch {
@@ -564,7 +562,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             setCoreActive(true)
             binding.tvCoreState.text = "⚡ WAKE ACTIVE // LISTENING..."
-            binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir. I'm listening..."
+            binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: Listening, Sir..."
             animateWakePulse()
         }
 
@@ -578,22 +576,9 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {}
 
         SoundEffectManager.playWakeChime()
-        var listened = false
-        val startListeningSafely = {
-            if (!listened) {
-                listened = true
-                scope.launch(Dispatchers.Main) {
-                    delay(120)
-                    triggerVoiceListening()
-                }
-            }
-        }
-        VoiceManager.speak("At your service, Sir.") {
-            startListeningSafely()
-        }
-        scope.launch {
-            delay(2200)
-            startListeningSafely()
+        scope.launch(Dispatchers.Main) {
+            delay(180)
+            triggerVoiceListening()
         }
     }
 
@@ -1412,11 +1397,16 @@ class MainActivity : AppCompatActivity() {
                         binding.tvCoreState.text = "HEARING..."
                     }
                 },
+                onRmsChanged = { rmsdB ->
+                    animateEqualizer(rmsdB)
+                },
                 onResult = { spokenText ->
+                    resetEqualizer()
                     setCoreActive(false)
                     handleUserInput(spokenText)
                 },
                 onError = { err ->
+                    resetEqualizer()
                     setCoreActive(false)
                     isProcessingCommand = false
                     binding.tvCoreState.text = if (isHandsFreeEnabled) "STANDBY // SAY 'HEY JARVIS'" else "STANDBY // TAP TO SPEAK"
@@ -1954,13 +1944,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsState() {
+        val hasNotif = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
         val hasAccess = AssistantAccessibilityService.isRunning
         val hasOverlay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
 
-        if (!hasAccess || !hasOverlay) {
+        if (!hasNotif || !hasAccess || !hasOverlay) {
             binding.cardPermissionAlert.visibility = View.VISIBLE
-            val missing = if (!hasAccess && !hasOverlay) "Accessibility & Overlay" else if (!hasAccess) "Accessibility" else "Overlay"
-            binding.tvPermMessage.text = "Grant $missing permission for full control."
+            val missing = mutableListOf<String>()
+            if (!hasNotif) missing.add("Notification Telemetry")
+            if (!hasAccess) missing.add("Accessibility")
+            if (!hasOverlay) missing.add("Overlay")
+            binding.tvPermMessage.text = "⚠️ Grant ${missing.joinToString(" & ")} for autonomous execution."
         } else {
             binding.cardPermissionAlert.visibility = View.GONE
             try {
@@ -1976,6 +1970,49 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatusPill.text = "● SUPER-BRAIN ONLINE"
         } else {
             binding.tvStatusPill.text = "● WORLDWIDE CORE ACTIVE"
+        }
+    }
+
+    private fun animateEqualizer(rmsdB: Float) {
+        if (rmsdB <= 1.0f) return
+        val norm = (rmsdB.coerceIn(0f, 10f) / 10f)
+        val boost = 1.0f + norm * 0.22f
+        runOnUiThread {
+            try {
+                binding.viewCoreGlow.scaleX = boost
+                binding.viewCoreGlow.scaleY = boost
+                val hBase = (12 * resources.displayMetrics.density).toInt()
+                binding.viewEq1.layoutParams.height = (hBase * (0.6f + norm * 1.2f)).toInt().coerceAtLeast(6)
+                binding.viewEq2.layoutParams.height = (hBase * (0.9f + norm * 1.8f)).toInt().coerceAtLeast(10)
+                binding.viewEq3.layoutParams.height = (hBase * (1.3f + norm * 2.5f)).toInt().coerceAtLeast(14)
+                binding.viewEq4.layoutParams.height = (hBase * (0.8f + norm * 1.6f)).toInt().coerceAtLeast(8)
+                binding.viewEq5.layoutParams.height = (hBase * (0.5f + norm * 1.0f)).toInt().coerceAtLeast(6)
+                binding.viewEq1.requestLayout()
+                binding.viewEq2.requestLayout()
+                binding.viewEq3.requestLayout()
+                binding.viewEq4.requestLayout()
+                binding.viewEq5.requestLayout()
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun resetEqualizer() {
+        runOnUiThread {
+            try {
+                binding.viewCoreGlow.scaleX = 1.0f
+                binding.viewCoreGlow.scaleY = 1.0f
+                val hBase = (6 * resources.displayMetrics.density).toInt()
+                binding.viewEq1.layoutParams.height = hBase
+                binding.viewEq2.layoutParams.height = (hBase * 1.6f).toInt()
+                binding.viewEq3.layoutParams.height = (hBase * 2.2f).toInt()
+                binding.viewEq4.layoutParams.height = (hBase * 1.4f).toInt()
+                binding.viewEq5.layoutParams.height = hBase
+                binding.viewEq1.requestLayout()
+                binding.viewEq2.requestLayout()
+                binding.viewEq3.requestLayout()
+                binding.viewEq4.requestLayout()
+                binding.viewEq5.requestLayout()
+            } catch (e: Exception) {}
         }
     }
 

@@ -3,10 +3,10 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#070A14"
+    android:background="@drawable/stark_hud_bg"
     android:padding="16dp">
 
-    <!-- Top Status Bar -->
+    <!-- Top Stark Telemetry Header -->
     <LinearLayout
         android:id="@+id/top_bar"
         android:layout_width="match_parent"
@@ -15,14 +15,30 @@
         android:orientation="horizontal"
         app:layout_constraintTop_toTopOf="parent">
 
-        <TextView
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="J.A.R.V.I.S."
-            android:textColor="#00E5FF"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.15" />
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="STARK INDUSTRIES"
+                android:textColor="#8000E5FF"
+                android:textSize="9sp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.25" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="J.A.R.V.I.S."
+                android:textColor="#00F0FF"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.15" />
+        </LinearLayout>
 
         <View
             android:layout_width="0dp"
@@ -33,10 +49,10 @@
             android:id="@+id/tv_status_pill"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/card_background"
+            android:background="@drawable/stark_chip_bg"
             android:paddingHorizontal="10dp"
-            android:paddingVertical="6dp"
-            android:text="● ACTIVE"
+            android:paddingVertical="5dp"
+            android:text="● ONLINE"
             android:textColor="#00E5FF"
             android:textSize="11sp"
             android:fontFamily="monospace" />
@@ -46,9 +62,9 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
-            android:background="@drawable/card_background"
+            android:background="@drawable/stark_chip_bg"
             android:paddingHorizontal="10dp"
-            android:paddingVertical="6dp"
+            android:paddingVertical="5dp"
             android:text="🎤 WAKE: ARMED"
             android:textColor="#00E5FF"
             android:textSize="11sp"
@@ -56,24 +72,24 @@
 
         <ImageButton
             android:id="@+id/btn_settings"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:layout_marginStart="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_manage"
             android:tint="#81D4FA" />
     </LinearLayout>
 
-    <!-- Permission Alert Pill (Only shown if setup is incomplete) -->
+    <!-- Permission & Notification Access Alert Banner -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/card_permission_alert"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        app:cardBackgroundColor="#1A00E5FF"
+        app:cardBackgroundColor="#2600E5FF"
         app:strokeColor="#00E5FF"
-        app:strokeWidth="1dp"
-        app:cardCornerRadius="12dp"
+        app:strokeWidth="1.5dp"
+        app:cardCornerRadius="14dp"
         android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/top_bar">
 
@@ -89,9 +105,10 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Permissions needed for phone control"
+                android:text="⚠️ Notification Access Offline: Tap Enable to authorize in Settings"
                 android:textColor="#E1F5FE"
-                android:textSize="12sp" />
+                android:textSize="12sp"
+                android:fontFamily="monospace" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_fix_perms"
@@ -99,71 +116,125 @@
                 android:layout_height="36dp"
                 android:text="Enable"
                 android:textSize="11sp"
+                android:fontFamily="monospace"
                 app:backgroundTint="#00E5FF"
                 android:textColor="#000000" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Center Living AI Core (Neural Orb) -->
+    <!-- Center Stark Arc Reactor Hologram -->
     <FrameLayout
         android:id="@+id/core_container"
         android:layout_width="220dp"
         android:layout_height="220dp"
         app:layout_constraintTop_toBottomOf="@id/card_permission_alert"
-        app:layout_constraintBottom_toTopOf="@id/tv_core_state"
+        app:layout_constraintBottom_toTopOf="@id/layout_waveform"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Outer Pulsing Glow -->
+        <!-- Outer Atmospheric Radial Halo -->
         <View
             android:id="@+id/view_core_glow"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:background="@drawable/neural_core_glow" />
 
-        <!-- Inner Arc Ring -->
+        <!-- Segmented Holographic Outer Ring -->
         <View
-            android:layout_width="140dp"
-            android:layout_height="140dp"
+            android:layout_width="170dp"
+            android:layout_height="170dp"
+            android:layout_gravity="center"
+            android:background="@drawable/arc_reactor_ring" />
+
+        <!-- Middle Containment Arc -->
+        <View
+            android:layout_width="125dp"
+            android:layout_height="125dp"
             android:layout_gravity="center"
             android:background="@drawable/floating_orb" />
 
-        <!-- Center Energy Core -->
+        <!-- Center Vibranium Plasma Core -->
         <View
             android:id="@+id/view_core_pulse"
-            android:layout_width="65dp"
-            android:layout_height="65dp"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
             android:layout_gravity="center"
-            android:background="@drawable/arc_reactor_bubble" />
+            android:background="@drawable/arc_reactor_plasma" />
 
+        <!-- Holographic Core Callout -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:text="AI"
-            android:textColor="#00E5FF"
-            android:textSize="14sp"
+            android:text="ARC"
+            android:textColor="#020817"
+            android:textSize="12sp"
             android:fontFamily="monospace"
             android:textStyle="bold" />
     </FrameLayout>
+
+    <!-- Dynamic Audio Waveform Equalizer -->
+    <LinearLayout
+        android:id="@+id/layout_waveform"
+        android:layout_width="wrap_content"
+        android:layout_height="18dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="2dp"
+        app:layout_constraintTop_toBottomOf="@id/core_container"
+        app:layout_constraintBottom_toTopOf="@id/tv_core_state"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <View
+            android:id="@+id/view_eq_1"
+            android:layout_width="4dp"
+            android:layout_height="6dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="#00E5FF" />
+        <View
+            android:id="@+id/view_eq_2"
+            android:layout_width="4dp"
+            android:layout_height="12dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="#00E5FF" />
+        <View
+            android:id="@+id/view_eq_3"
+            android:layout_width="4dp"
+            android:layout_height="16dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="#00F0FF" />
+        <View
+            android:id="@+id/view_eq_4"
+            android:layout_width="4dp"
+            android:layout_height="10dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="#00E5FF" />
+        <View
+            android:id="@+id/view_eq_5"
+            android:layout_width="4dp"
+            android:layout_height="6dp"
+            android:layout_marginHorizontal="2dp"
+            android:background="#00E5FF" />
+    </LinearLayout>
 
     <!-- State & Subtitle -->
     <TextView
         android:id="@+id/tv_core_state"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="STANDBY // TAP TO SPEAK"
+        android:text="[ STANDBY // SAY 'HEY JARVIS' ]"
         android:textColor="#81D4FA"
         android:textSize="12sp"
         android:fontFamily="monospace"
-        android:letterSpacing="0.1"
-        android:layout_marginTop="8dp"
-        app:layout_constraintTop_toBottomOf="@id/core_container"
-        app:layout_constraintBottom_toTopOf="@id/scroll_protocols"
+        android:letterSpacing="0.12"
+        android:layout_marginTop="4dp"
+        app:layout_constraintTop_toBottomOf="@id/layout_waveform"
+        app:layout_constraintBottom_toTopOf="@id/scroll_protocols_container"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Quick System Controls -->
+    <!-- Stark Protocols & System Control Ribbon -->
     <HorizontalScrollView
         android:id="@+id/scroll_protocols_container"
         android:layout_width="match_parent"
@@ -178,31 +249,57 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingHorizontal="16dp"
+            android:paddingHorizontal="4dp"
             android:gravity="center">
 
             <TextView
-                android:id="@+id/chip_calibrate_voice"
+                android:id="@+id/chip_house_party"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:background="@drawable/card_background"
+                android:background="@drawable/stark_chip_bg"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="7dp"
-                android:text="🎯 TRAIN WAKE"
+                android:text="⚡ HOUSE PARTY"
                 android:textColor="#00E5FF"
                 android:textSize="11sp"
                 android:fontFamily="monospace" />
 
             <TextView
-                android:id="@+id/chip_voice_tts"
+                android:id="@+id/chip_clean_slate"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:background="@drawable/card_background"
+                android:background="@drawable/stark_chip_bg"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="7dp"
-                android:text="🎙️ MALE VOICE"
+                android:text="🧹 CLEAN SLATE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_sentry_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/stark_chip_bg"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="7dp"
+                android:text="🛡️ SENTRY MODE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_protocol_11"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/stark_chip_bg"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="7dp"
+                android:text="🔴 PROTOCOL 11"
                 android:textColor="#00E5FF"
                 android:textSize="11sp"
                 android:fontFamily="monospace" />
@@ -212,7 +309,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:background="@drawable/card_background"
+                android:background="@drawable/stark_chip_bg"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="7dp"
                 android:text="📺 SMART TV"
@@ -224,7 +321,8 @@
                 android:id="@+id/chip_diagnostics"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="@drawable/card_background"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/stark_chip_bg"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="7dp"
                 android:text="📊 TELEMETRY"
@@ -232,31 +330,72 @@
                 android:textSize="11sp"
                 android:fontFamily="monospace" />
 
+            <TextView
+                android:id="@+id/chip_calibrate_voice"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/stark_chip_bg"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="7dp"
+                android:text="🎯 TRAIN WAKE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/chip_voice_tts"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/stark_chip_bg"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="7dp"
+                android:text="🎙️ BRITISH VOICE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
         </LinearLayout>
     </HorizontalScrollView>
 
-    <!-- Live Conversation Terminal -->
+    <!-- Holographic Conversation HUD Terminal -->
     <ScrollView
         android:id="@+id/dialogue_container"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_marginBottom="12dp"
-        android:background="@drawable/card_background"
-        android:padding="14dp"
-        app:layout_constraintTop_toBottomOf="@id/scroll_protocols"
+        android:background="@drawable/stark_card_bg"
+        android:padding="16dp"
+        app:layout_constraintTop_toBottomOf="@id/scroll_protocols_container"
         app:layout_constraintBottom_toTopOf="@id/bottom_input_bar">
 
-        <TextView
-            android:id="@+id/tv_transcript"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Jarvis: Standing by, Sir. I am listening across your device."
-            android:textColor="#E1F5FE"
-            android:textSize="14sp"
-            android:lineSpacingExtra="4dp" />
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="// TACTICAL TELEMETRY STREAM"
+                android:textColor="#5900E5FF"
+                android:textSize="10sp"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.18"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:id="@+id/tv_transcript"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Jarvis: Standing by, Sir. Arc reactor online and listening across local perimeter."
+                android:textColor="#E1F5FE"
+                android:textSize="13sp"
+                android:fontFamily="monospace"
+                android:lineSpacingExtra="4dp" />
+        </LinearLayout>
     </ScrollView>
 
-    <!-- Bottom Input Bar -->
+    <!-- Bottom Input & Tactical Controls Capsule -->
     <LinearLayout
         android:id="@+id/bottom_input_bar"
         android:layout_width="match_parent"
@@ -269,7 +408,13 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            app:boxBackgroundMode="filled"
+            app:boxBackgroundColor="#1A0A1935"
             app:boxStrokeColor="#00E5FF"
+            app:boxCornerRadiusTopStart="14dp"
+            app:boxCornerRadiusTopEnd="14dp"
+            app:boxCornerRadiusBottomStart="14dp"
+            app:boxCornerRadiusBottomEnd="14dp"
             app:hintTextColor="#00E5FF"
             android:textColorHint="#81D4FA">
 
@@ -277,8 +422,10 @@
                 android:id="@+id/et_command"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Ask or command Jarvis..."
+                android:hint="Command Jarvis or trigger protocol..."
                 android:textColor="#FFFFFF"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
                 android:imeOptions="actionSend"
                 android:inputType="text" />
         </com.google.android.material.textfield.TextInputLayout>

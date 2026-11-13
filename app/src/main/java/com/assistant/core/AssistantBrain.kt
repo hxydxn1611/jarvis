@@ -531,43 +531,73 @@ class AssistantBrain(private val context: Context) {
         }
 
         // 3. Unread Messages Briefing
-        if (lower.contains("unread message") || lower.contains("read unread") || lower.contains("check unread") || lower.contains("read my message") || lower.contains("check my message")) {
+        if (lower.contains("unread notification") || lower.contains("unread message") || lower.contains("read unread") || 
+            lower.contains("check unread") || lower.contains("read my message") || lower.contains("read my notification") || 
+            lower.contains("check my message") || lower.contains("check my notification") || lower.contains("unread mail") || 
+            lower.contains("unread email") || lower.contains("check unread msg") || lower.contains("read notifications")) {
             val (spoken, _) = AssistantNotificationService.getDetailedUnreadBriefing(context)
             return Pair(spoken, listOf(AssistantAction(ActionType.COMMUNICATION_UPDATES), AssistantAction(ActionType.SPEAK, value = spoken)))
         }
 
         // 4. Updates / Channel briefing
-        if (lower == "updates" || lower == "any updates" || lower.contains("channel updates") || lower.contains("notification update") || lower.contains("app updates")) {
+        if (lower == "updates" || lower == "any updates" || lower == "notifications" || lower == "notification" ||
+            lower.contains("check notification") || lower.contains("any notification") || lower.contains("channel update") || 
+            lower.contains("notification update") || lower.contains("app update") || lower.contains("notification status") || 
+            lower == "status" || lower.contains("system status") || lower.contains("comms status") || lower.contains("status of notifications")) {
             val report = AssistantNotificationService.getChannelUpdatesReport(context)
-            val spoken = AssistantNotificationService.formatSpokenUpdates(report)
+            val spoken = AssistantNotificationService.formatSpokenUpdates(report, context)
             return Pair(spoken, listOf(AssistantAction(ActionType.COMMUNICATION_UPDATES), AssistantAction(ActionType.SPEAK, value = spoken)))
         }
 
         // 5. WhatsApp Messaging
-        if (lower.contains("whatsapp") && (lower.contains("send") || lower.contains("message") || lower.contains("hi") || lower.contains("text"))) {
-            val phoneMatch = Regex("""\b(\+?\d{10,13})\b""").find(cmd)?.value
-            var target = phoneMatch ?: ""
+        if (lower.contains("whatsapp") && (lower.contains("send") || lower.contains("message") || lower.contains("hi") || lower.contains("text") || lower.contains("transmit"))) {
+            var rawTarget = ""
             var message = "Hi"
 
-            if (target.isBlank()) {
-                val toMatch = Regex("""(?i)\b(to|for)\s+([a-zA-Z0-9 ]+?)\s+(on|in|via)?\s*whatsapp""").find(cmd)
-                    ?: Regex("""(?i)whatsapp\s+(message\s+)?to\s+([a-zA-Z0-9 ]+)""").find(cmd)
-                if (toMatch != null) {
-                    target = toMatch.groupValues[2].trim()
+            // Extract message
+            if (lower.contains(" saying ")) {
+                message = cmd.substring(cmd.indexOf(" saying ", ignoreCase = true) + 8).trim()
+            } else if (lower.contains(" that ")) {
+                message = cmd.substring(cmd.indexOf(" that ", ignoreCase = true) + 6).trim()
+            } else if (lower.contains(" message ")) {
+                val after = cmd.substring(cmd.indexOf(" message ", ignoreCase = true) + 9).trim()
+                if (!after.contains("to ") && after.isNotBlank()) {
+                    message = after
                 }
-            }
-
-            if (lower.contains("saying ")) {
-                message = cmd.substringAfter("saying ").trim()
-            } else if (lower.contains("message ")) {
-                message = cmd.substringAfter("message ").trim()
-            } else if (lower.contains("send a hi") || lower.contains("send hi")) {
+            } else if (lower.contains("send a hi") || lower.contains("send hi") || lower.endsWith("say hi")) {
                 message = "Hi"
             }
 
-            if (target.isNotBlank()) {
-                val speech = "Transmitting WhatsApp message to $target, Sir."
-                return Pair(speech, listOf(AssistantAction(ActionType.SEND_WHATSAPP, target = target, value = message), AssistantAction(ActionType.SPEAK, value = speech)))
+            // Extract recipient target: isolate command prefix before 'saying' or 'that'
+            val prefixForTarget = if (lower.contains(" saying ")) {
+                cmd.substring(0, cmd.indexOf(" saying ", ignoreCase = true))
+            } else if (lower.contains(" that ")) {
+                cmd.substring(0, cmd.indexOf(" that ", ignoreCase = true))
+            } else {
+                cmd
+            }
+
+            val toMatch = Regex("""(?i)\b(to|for)\s+([a-zA-Z0-9 +-]+)""").find(prefixForTarget)
+            if (toMatch != null) {
+                rawTarget = toMatch.groupValues[2].trim()
+                    .replace(Regex("""(?i)\b(on|in|via)\s+whatsapp\b"""), "")
+                    .replace(Regex("""(?i)\bwhatsapp\b"""), "").trim()
+            } else {
+                val directPhone = Regex("""\b(\+?\d[\d -]{8,15}\d)\b""").find(prefixForTarget)?.value
+                if (!directPhone.isNullOrBlank()) {
+                    rawTarget = directPhone
+                }
+            }
+
+            rawTarget = rawTarget.trim()
+            if (rawTarget.equals("number", ignoreCase = true) || rawTarget.equals("a number", ignoreCase = true) || rawTarget.equals("contact", ignoreCase = true)) {
+                val speech = "Which contact or phone number shall I transmit this WhatsApp message to, Sir?"
+                return Pair(speech, listOf(AssistantAction(ActionType.SPEAK, value = speech)))
+            }
+
+            if (rawTarget.isNotBlank()) {
+                val speech = "Transmitting WhatsApp message to $rawTarget, Sir."
+                return Pair(speech, listOf(AssistantAction(ActionType.SEND_WHATSAPP, target = rawTarget, value = message), AssistantAction(ActionType.SPEAK, value = speech)))
             } else {
                 val speech = "Opening WhatsApp communications, Sir."
                 return Pair(speech, listOf(AssistantAction(ActionType.OPEN_APP, target = "com.whatsapp"), AssistantAction(ActionType.SPEAK, value = speech)))
