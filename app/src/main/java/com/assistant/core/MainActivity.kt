@@ -122,13 +122,15 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         checkPermissionsState()
+        isProcessingCommand = false
+        VoiceManager.stopSpeaking()
 
         // Stop background wake service when app is in foreground to prevent mic collisions
         try {
             stopService(Intent(this, WakeWordService::class.java))
         } catch (e: Exception) {}
 
-        if (isHandsFreeEnabled && !isProcessingCommand) {
+        if (isHandsFreeEnabled) {
             startAmbientWakeWordListener()
         } else {
             binding.tvCoreState.text = "STANDBY // TAP TO SPEAK"
@@ -636,11 +638,13 @@ class MainActivity : AppCompatActivity() {
         // 2. Open Applications (Dynamic matching against all installed apps)
         if (lower.startsWith("open ") || lower.startsWith("launch ") || lower.startsWith("start ")) {
             val appName = lower.removePrefix("open ").removePrefix("launch ").removePrefix("start ").trim()
-            val opened = openAppByName(appName)
-            if (opened) {
-                speakAndDisplay("Opening $appName, Sir.")
-                return true
+            val resolved = resolvePackageForApp(appName)
+            if (resolved != null) {
+                launchApp(resolved.first, resolved.second)
+            } else {
+                speakAndDisplay("I could not locate an application named '$appName' on this device, Sir.")
             }
+            return true
         }
 
         // 3. Make Phone Calls
@@ -747,37 +751,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openAppByName(name: String): Boolean {
+    private fun launchApp(pkg: String, displayName: String) {
+        speakAndDisplay("Opening $displayName, Sir.")
+        scope.launch {
+            delay(400)
+            try {
+                val intent = packageManager.getLaunchIntentForPackage(pkg)
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch app $pkg", e)
+            } finally {
+                isProcessingCommand = false
+            }
+        }
+    }
+
+    private fun resolvePackageForApp(name: String): Pair<String, String>? {
         val clean = name.lowercase().trim()
         val directMap = mapOf(
             "whatsapp" to "com.whatsapp",
+            "whatapp" to "com.whatsapp",
+            "watsapp" to "com.whatsapp",
+            "what app" to "com.whatsapp",
+            "what's app" to "com.whatsapp",
             "youtube" to "com.google.android.youtube",
+            "yt" to "com.google.android.youtube",
+            "you tube" to "com.google.android.youtube",
             "chrome" to "com.android.chrome",
             "browser" to "com.android.chrome",
+            "google chrome" to "com.android.chrome",
             "spotify" to "com.spotify.music",
             "camera" to "com.sec.android.app.camera",
             "gallery" to "com.sec.android.gallery3d",
             "photos" to "com.google.android.apps.photos",
             "calculator" to "com.sec.android.app.popupcalculator",
+            "calc" to "com.sec.android.app.popupcalculator",
             "settings" to "com.android.settings",
             "maps" to "com.google.android.apps.maps",
             "google maps" to "com.google.android.apps.maps",
             "gmail" to "com.google.android.gm",
+            "mail" to "com.google.android.gm",
             "email" to "com.google.android.gm",
             "instagram" to "com.instagram.android",
+            "insta" to "com.instagram.android",
             "telegram" to "org.telegram.messenger",
             "clock" to "com.sec.android.app.clockpackage",
             "phone" to "com.samsung.android.dialer",
-            "messages" to "com.google.android.apps.messaging"
+            "dialer" to "com.samsung.android.dialer",
+            "messages" to "com.google.android.apps.messaging",
+            "sms" to "com.google.android.apps.messaging"
         )
 
         val targetPkg = directMap[clean]
         if (targetPkg != null) {
-            val intent = packageManager.getLaunchIntentForPackage(targetPkg)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                return true
+            val pm = packageManager
+            val launchIntent = pm.getLaunchIntentForPackage(targetPkg)
+            if (launchIntent != null) {
+                return Pair(targetPkg, clean.replaceFirstChar { it.uppercase() })
             }
         }
 
@@ -787,21 +820,21 @@ class MainActivity : AppCompatActivity() {
             val mainIntent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
             val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
             for (ri in resolveInfos) {
-                val label = ri.loadLabel(pm).toString().lowercase()
-                val pkg = ri.activityInfo.packageName.lowercase()
-                if (label.contains(clean) || clean.contains(label) || pkg.contains(clean)) {
-                    val launchIntent = pm.getLaunchIntentForPackage(ri.activityInfo.packageName)
+                val label = ri.loadLabel(pm).toString()
+                val pkg = ri.activityInfo.packageName
+                val lowerLabel = label.lowercase()
+                val lowerPkg = pkg.lowercase()
+                if (lowerLabel == clean || lowerLabel.contains(clean) || clean.contains(lowerLabel) || lowerPkg.contains(clean)) {
+                    val launchIntent = pm.getLaunchIntentForPackage(pkg)
                     if (launchIntent != null) {
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        startActivity(launchIntent)
-                        return true
+                        return Pair(pkg, label)
                     }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Dynamic app launch error", e)
         }
-        return false
+        return null
     }
 
     private fun setFlashlight(enable: Boolean) {
@@ -829,7 +862,19 @@ class MainActivity : AppCompatActivity() {
         for (action in actions) {
             when (action.type) {
                 ActionType.OPEN_APP -> {
-                    action.target?.let { openAppByName(it) }
+                    action.target?.let { appNameOrPkg ->
+                        val resolved = resolvePackageForApp(appNameOrPkg)
+                        if (resolved != null) {
+                            launchApp(resolved.first, resolved.second)
+                        } else {
+                            val intent = packageManager.getLaunchIntentForPackage(appNameOrPkg)
+                            if (intent != null) {
+                                launchApp(appNameOrPkg, appNameOrPkg)
+                            } else {
+                                speakAndDisplay("Application '$appNameOrPkg' is not installed, Sir.")
+                            }
+                        }
+                    }
                 }
                 ActionType.FLASHLIGHT_TOGGLE -> {
                     setFlashlight(action.value != "false")
