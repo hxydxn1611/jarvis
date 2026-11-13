@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private var isProcessingCommand = false
     private var activeTurnId = 0L
     private var isWakeAcknowledged = false
+    private var pendingAutoListen = false
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.RECORD_AUDIO,
@@ -134,11 +135,18 @@ class MainActivity : AppCompatActivity() {
 
         if (intent?.getBooleanExtra("AUTO_LISTEN", false) == true) {
             intent?.removeExtra("AUTO_LISTEN")
-            triggerVoiceListening()
+            pendingAutoListen = true
         }
         if (intent?.getBooleanExtra("SHOW_TV_REMOTE", false) == true) {
             intent?.removeExtra("SHOW_TV_REMOTE")
             showTvRemoteDialog()
+        }
+        val u = intent?.getStringExtra("TRANSCRIPT_USER")
+        val j = intent?.getStringExtra("TRANSCRIPT_JARVIS")
+        if (!u.isNullOrBlank() && !j.isNullOrBlank()) {
+            intent?.removeExtra("TRANSCRIPT_USER")
+            intent?.removeExtra("TRANSCRIPT_JARVIS")
+            binding.tvTranscript.text = "You: $u\n\nJarvis: $j"
         }
     }
 
@@ -147,19 +155,24 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         if (intent?.getBooleanExtra("AUTO_LISTEN", false) == true) {
             intent?.removeExtra("AUTO_LISTEN")
-            triggerVoiceListening()
+            pendingAutoListen = true
         }
         if (intent?.getBooleanExtra("SHOW_TV_REMOTE", false) == true) {
             intent?.removeExtra("SHOW_TV_REMOTE")
             showTvRemoteDialog()
+        }
+        val u = intent?.getStringExtra("TRANSCRIPT_USER")
+        val j = intent?.getStringExtra("TRANSCRIPT_JARVIS")
+        if (!u.isNullOrBlank() && !j.isNullOrBlank()) {
+            intent?.removeExtra("TRANSCRIPT_USER")
+            intent?.removeExtra("TRANSCRIPT_JARVIS")
+            binding.tvTranscript.text = "You: $u\n\nJarvis: $j"
         }
     }
 
     override fun onResume() {
         super.onResume()
         checkPermissionsState()
-        isProcessingCommand = false
-        VoiceManager.stopSpeaking()
 
         // Proactively scan WiFi mesh for Smart TVs and appliances in background
         if (SmartTvManager.activeTv == null) {
@@ -171,6 +184,30 @@ class MainActivity : AppCompatActivity() {
             stopService(Intent(this, WakeWordService::class.java))
         } catch (e: Exception) {}
 
+        if (pendingAutoListen) {
+            pendingAutoListen = false
+            SoundEffectManager.playWakeChime()
+            var listened = false
+            val startListeningSafely = {
+                if (!listened) {
+                    listened = true
+                    scope.launch(Dispatchers.Main) {
+                        delay(120)
+                        triggerVoiceListening()
+                    }
+                }
+            }
+            VoiceManager.speak("At your service, Sir.") {
+                startListeningSafely()
+            }
+            scope.launch {
+                delay(2200)
+                startListeningSafely()
+            }
+            return
+        }
+
+        isProcessingCommand = false
         if (isHandsFreeEnabled) {
             startAmbientWakeWordListener()
         } else {
@@ -463,9 +500,9 @@ class MainActivity : AppCompatActivity() {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 350L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 600L)
                 }
                 ambientRecognizer?.startListening(intent)
             } catch (e: Exception) {
@@ -522,11 +559,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun acknowledgeWake() {
-        isWakeAcknowledged = true
+        stopAmbientWakeWordListener()
+        isProcessingCommand = true
         runOnUiThread {
             setCoreActive(true)
             binding.tvCoreState.text = "⚡ WAKE ACTIVE // LISTENING..."
-            binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: Yes, Sir? I'm listening..."
+            binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: At your service, Sir. I'm listening..."
             animateWakePulse()
         }
 
@@ -540,17 +578,22 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {}
 
         SoundEffectManager.playWakeChime()
-
-        // 7-second standby recovery if user issues no follow-up directive
-        scope.launch {
-            delay(7000)
-            if (isWakeAcknowledged && !isProcessingCommand) {
-                isWakeAcknowledged = false
-                runOnUiThread {
-                    setCoreActive(false)
-                    binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
+        var listened = false
+        val startListeningSafely = {
+            if (!listened) {
+                listened = true
+                scope.launch(Dispatchers.Main) {
+                    delay(120)
+                    triggerVoiceListening()
                 }
             }
+        }
+        VoiceManager.speak("At your service, Sir.") {
+            startListeningSafely()
+        }
+        scope.launch {
+            delay(2200)
+            startListeningSafely()
         }
     }
 
@@ -795,6 +838,38 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val lower = clean
+
+        // -1. Stark Protocols Execution
+        val proto = StarkProtocolEngine.matchProtocol(this, clean)
+        if (proto != null) {
+            val (speech, actions) = proto
+            speakAndDisplay(speech)
+            executeDirectOrAccessibilityActions(actions)
+            return true
+        }
+
+        // -0.5. Direct Voice Reply to incoming notifications
+        if (lower.startsWith("reply ") || lower.startsWith("yes reply ") || lower.startsWith("tell him ") || lower.startsWith("tell her ") || lower.startsWith("respond ")) {
+            val replyText = clean.replace(Regex("""(?i)^(yes\s+)?(reply|tell him|tell her|respond)\s*(that|saying)?\s*"""), "").trim()
+            if (replyText.isNotBlank()) {
+                val dispatched = AssistantNotificationService.dispatchReply(replyText, this)
+                if (dispatched) {
+                    val target = AssistantNotificationService.lastReplyable?.sender ?: "recipient"
+                    speakAndDisplay("Direct reply dispatched to $target: '$replyText', Sir.")
+                    return true
+                }
+            }
+        }
+
+        // -0.2. Read Unread Messages Briefing
+        if (lower.contains("unread message") || lower.contains("read unread") || lower.contains("check unread") || lower.contains("read my message") || lower.contains("check my message")) {
+            val (spoken, transcript) = AssistantNotificationService.getDetailedUnreadBriefing(this)
+            speakAndDisplay(spoken)
+            runOnUiThread {
+                binding.tvTranscript.text = transcript
+            }
+            return true
+        }
 
         // 0. Communication Updates Briefing (Shortcut: "updates")
         if (lower == "updates" || lower == "update" || lower == "any updates" || lower.contains("check updates") || 

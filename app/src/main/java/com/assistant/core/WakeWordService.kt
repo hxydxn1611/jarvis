@@ -188,9 +188,9 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, deviceTag)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, deviceTag)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 350L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 800L)
             }
             speechRecognizer?.startListening(intent)
         } catch (e: Throwable) {
@@ -273,9 +273,15 @@ class WakeWordService : Service() {
             if (command.isNotBlank()) {
                 scope.launch {
                     val apiKey = prefs.getString("gemini_api_key", null)
-                    val (_, actions) = brain.processCommandStream(command, apiKey) { chunk ->
+                    val (reply, actions) = brain.processCommandStream(command, apiKey) { chunk ->
                         VoiceManager.streamSentence(chunk)
                     }
+                    val bringToFront = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        putExtra("TRANSCRIPT_USER", command)
+                        putExtra("TRANSCRIPT_JARVIS", reply)
+                    }
+                    startActivity(bringToFront)
                     if (actions.isNotEmpty()) {
                         val dm = DeviceManager(this@WakeWordService)
                         for (action in actions) {
@@ -345,13 +351,6 @@ class WakeWordService : Service() {
                     putExtra("AUTO_LISTEN", true)
                 }
                 startActivity(bringToFront)
-
-                VoiceManager.speak("At your service, Sir.") {
-                    scope.launch {
-                        delay(600)
-                        restartRecognizer()
-                    }
-                }
             }
         } else {
             scope.launch {
