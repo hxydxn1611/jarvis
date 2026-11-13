@@ -261,6 +261,26 @@ class AssistantAccessibilityService : AccessibilityService() {
                             VoiceManager.speak(text)
                         }
                     }
+                    ActionType.CAST_TO_TV -> {
+                        val query = action.target ?: "Trending"
+                        val targetIp = action.value ?: SmartTvManager.activeTv?.ip ?: ""
+                        SmartTvManager.castToTv(targetIp, query) { _, msg ->
+                            VoiceManager.speak(msg)
+                        }
+                    }
+                    ActionType.CONTROL_TV -> {
+                        val cmd = action.value ?: "VOL_UP"
+                        val targetIp = SmartTvManager.activeTv?.ip ?: ""
+                        SmartTvManager.sendTvKey(targetIp, cmd) { _, msg ->
+                            VoiceManager.speak(msg)
+                        }
+                    }
+                    ActionType.SCAN_WIFI -> {
+                        SmartTvManager.scanLocalNetwork(this@AssistantAccessibilityService) { tvs ->
+                            VoiceManager.speak("WiFi network scan found ${tvs.size} Smart TV displays, Sir.")
+                        }
+                    }
+                    else -> {}
                 }
             }
             onComplete?.invoke(true)

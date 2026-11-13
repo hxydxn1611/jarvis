@@ -63,7 +63,7 @@ class DeviceManager(private val context: Context) {
     }
 
     // Resolves contact name (e.g. "Rahul", "Mom") to actual phone number
-    private fun lookupContactNumber(name: String): String? {
+    fun lookupContactNumber(name: String): String? {
         var number: String? = null
         val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
         val projection = arrayOf(
