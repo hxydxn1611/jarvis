@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private var isAmbientListening = false
     private var isProcessingCommand = false
     private var activeTurnId = 0L
+    private var isWakeAcknowledged = false
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.RECORD_AUDIO,
@@ -436,12 +437,19 @@ class MainActivity : AppCompatActivity() {
 
         val (matched, command) = evaluateWakeMatch(matches, customSignatures)
         if (matched) {
-            stopAmbientWakeWordListener()
-
             if (command.isNotBlank()) {
+                isWakeAcknowledged = false
+                stopAmbientWakeWordListener()
                 handleUserInput(command)
             } else {
                 acknowledgeWake()
+            }
+        } else if (isWakeAcknowledged) {
+            val bestCandidate = matches.firstOrNull { it.trim().length >= 2 }?.trim() ?: ""
+            if (bestCandidate.isNotBlank()) {
+                isWakeAcknowledged = false
+                stopAmbientWakeWordListener()
+                handleUserInput(bestCandidate)
             }
         } else {
             // Any natural English speech spoken while dashboard is active
@@ -451,7 +459,7 @@ class MainActivity : AppCompatActivity() {
                 handleUserInput(bestCandidate)
             } else {
                 scope.launch {
-                    delay(300)
+                    delay(250)
                     restartAmbientListener()
                 }
             }
@@ -459,21 +467,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun acknowledgeWake() {
-        stopAmbientWakeWordListener()
-        isProcessingCommand = true
-        setCoreActive(true)
-        binding.tvCoreState.text = "ONLINE // LISTENING..."
-        binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: Yes, Sir?"
+        isWakeAcknowledged = true
+        runOnUiThread {
+            setCoreActive(true)
+            binding.tvCoreState.text = "⚡ WAKE ACTIVE // LISTENING..."
+            binding.tvTranscript.text = "You: Hey Jarvis\n\nJarvis: Yes, Sir? I'm listening..."
+            animateWakePulse()
+        }
 
         try {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                val timings = longArrayOf(0, 60, 60, 90)
+                val amplitudes = intArrayOf(0, 255, 0, 255)
+                vibrator?.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
             }
         } catch (e: Exception) {}
 
         SoundEffectManager.playWakeChime()
-        triggerVoiceListening()
+
+        // 7-second standby recovery if user issues no follow-up directive
+        scope.launch {
+            delay(7000)
+            if (isWakeAcknowledged && !isProcessingCommand) {
+                isWakeAcknowledged = false
+                runOnUiThread {
+                    setCoreActive(false)
+                    binding.tvCoreState.text = "STANDBY // SAY 'HEY JARVIS'"
+                }
+            }
+        }
+    }
+
+    private fun animateWakePulse() {
+        try {
+            val scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 1.0f, 1.35f, 1.05f)
+            val scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 1.0f, 1.35f, 1.05f)
+            val alpha = PropertyValuesHolder.ofFloat(View.ALPHA, 0.7f, 1.0f, 0.85f)
+            ObjectAnimator.ofPropertyValuesHolder(binding.viewCoreGlow, scaleX, scaleY, alpha).apply {
+                duration = 450
+                start()
+            }
+        } catch (e: Exception) {}
     }
 
     private fun evaluateWakeMatch(candidates: List<String>, customSignatures: Set<String>): Pair<Boolean, String> {
